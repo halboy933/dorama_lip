@@ -30,7 +30,28 @@ object WavUtils {
         for(t in 0 until frames){ val off=t*hop; val power=FloatArray(bins); for(k in 0 until bins){var re=0f;var im=0f;for(n in 0 until win){val v=x.getOrElse(off+n){0f}*hann[n];re+=v*cosT[k][n];im-=v*sinT[k][n]};power[k]=re*re+im*im}; for(m in 0 until 80){var s=0f;for(k in 0 until bins)s+=power[k]*filters[m][k]; mel[m][t]=(ln(max(1e-10f,s).toDouble())/ln(10.0)).toFloat()} }
         var mx=-1e9f; for(r in mel) for(v in r) if(v>mx)mx=v; for(r in mel) for(i in r.indices) r[i]=max(mx-8f,r[i]); return mel
     }
-    private fun melFilters(m:Int,bins:Int,sr:Int,nfft:Int):Array<FloatArray>{ fun hzMel(h:Double)=2595.0*log10(1+h/700); fun melHz(v:Double)=700*(10.0.pow(v/2595.0)-1); val lo=hzMel(55.0); val hi=hzMel(7600.0); val pts=DoubleArray(m+2){melHz(lo+(hi-lo)*it/(m+1))}; val idx=IntArray(m+2){floor((nfft+1)*pts[it]/sr).toInt().coerceIn(0,bins-1)}; return Array(m){j->FloatArray(bins){k-> when {k<idx[j]||k>idx[j+2]->0f;k<=idx[j+1]->(k-idx[j]).toFloat()/max(1,idx[j+1]-idx[j]);else->(idx[j+2]-k).toFloat()/max(1,idx[j+2]-idx[j+1])}}} }
+    private fun melFilters(m: Int, bins: Int, sr: Int, nfft: Int): Array<FloatArray> {
+        val lo = 2595.0 * log10(1.0 + 55.0 / 700.0)
+        val hi = 2595.0 * log10(1.0 + 7600.0 / 700.0)
+        val pts = DoubleArray(m + 2) {
+            val mel = lo + (hi - lo) * it / (m + 1)
+            700.0 * (10.0.pow(mel / 2595.0) - 1.0)
+        }
+        val idx = IntArray(m + 2) {
+            floor((nfft + 1) * pts[it] / sr).toInt().coerceIn(0, bins - 1)
+        }
+        return Array(m) { j ->
+            FloatArray(bins) { k ->
+                when {
+                    k < idx[j] || k > idx[j + 2] -> 0f
+                    k <= idx[j + 1] ->
+                        (k - idx[j]).toFloat() / max(1, idx[j + 1] - idx[j])
+                    else ->
+                        (idx[j + 2] - k).toFloat() / max(1, idx[j + 2] - idx[j + 1])
+                }
+            }
+        }
+    }
     private fun le16(b:ByteArray,p:Int)=(b[p].toInt() and 255) or ((b[p+1].toInt() and 255) shl 8)
     private fun le32(b:ByteArray,p:Int)=le16(b,p) or (le16(b,p+2) shl 16)
 }
