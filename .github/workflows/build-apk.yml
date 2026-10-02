@@ -12,5 +12,5 @@ jobs:
       - run: gradle assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: DoramaAvatarLipSync-v0.3-debug
+          name: DoramaAvatarLipSync-v0.4-debug
           path: app/build/outputs/apk/debug/app-debug.apk
