@@ -6,6 +6,8 @@ import android.graphics.*
 import android.media.*
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
+import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.widget.*
@@ -107,7 +109,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /*
-     * V0.4: не берём огромный квадрат 1.5x вокруг лица.
+     * V0.5: не берём огромный квадрат 1.5x вокруг лица.
      * Используем сам face box с небольшими полями, как ближе к пайплайну Wav2Lip.
      */
     private fun cropInfo(b: Bitmap, r: Rect): FaceCrop {
@@ -169,7 +171,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /*
-     * V0.4: вставляем только нижнюю часть сгенерированного лица.
+     * V0.5: вставляем только нижнюю часть сгенерированного лица.
      * Глаза/волосы/фон остаются из оригинала. По краям мягкое feather-смешивание.
      */
     private fun compositeLower(base: Bitmap, generated96: Bitmap, c: FaceCrop): Bitmap {
@@ -241,26 +243,33 @@ class MainActivity : AppCompatActivity() {
                             session.run(mapOf(melName to mt, imgName to img)).use { r -> outputBitmap(r[0].value) }
                         }
                     }
-                    rendered.add(compositeLower(base, face, crop))
+                    val composed = compositeLower(base, face, crop)
+                    if (f == 0) {
+                        val stamp = System.currentTimeMillis()
+                        savePng(crop.bitmap, "V05_01_input_crop_${stamp}.png")
+                        savePng(face, "V05_02_wav2lip_face_${stamp}.png")
+                        savePng(composed, "V05_03_composite_before_encoder_${stamp}.png")
+                    }
+                    rendered.add(composed)
                     face.recycle()
                     if (f % 3 == 0) runOnUiThread {
                         progress.progress = 1 + f * 75 / frames
-                        status.text = "V0.4 lip-sync: ${f + 1}/$frames кадров"
+                        status.text = "V0.5 lip-sync: ${f + 1}/$frames кадров"
                     }
                 }
                 session.close()
-                val tmp = File(cacheDir, "v04_${System.currentTimeMillis()}.mp4")
-                encodeMp4(rendered, samples, tmp)
+                val tmp = File(cacheDir, "v05_${System.currentTimeMillis()}.mp4")
+                val encoderInfo = encodeMp4(rendered, samples, tmp)
                 rendered.forEach { it.recycle() }
                 saveMovie(tmp)
                 val sec = (System.currentTimeMillis() - started) / 1000.0
                 runOnUiThread {
                     progress.progress = 100
-                    status.text = "✓ V0.4 ГОТОВА\n✓ Исправлена нижняя mask Wav2Lip\n✓ Новый face crop\n✓ Мягкий paste-back нижней части лица\n✓ $frames кадров / H.264 + AAC\n⏱ ${"%.1f".format(sec)} сек\n📁 Movies/DoramaAvatar\n\nПришли MP4 — проверим рот и границы."
-                    Toast.makeText(this, "MP4 V0.4 сохранён", Toast.LENGTH_LONG).show()
+                    status.text = "✓ V0.5 ГОТОВА\n✓ PNG до кодирования сохранены в Pictures/DoramaAvatar\n✓ MP4: ${encoderInfo.width}x${encoderInfo.height}\n✓ AVC codec: ${encoderInfo.codec}\n✓ YUV format: ${encoderInfo.colorFormat}\n✓ $frames кадров / H.264 + AAC\n⏱ ${"%.1f".format(sec)} сек\n📁 Movies/DoramaAvatar\n\nПришли MP4 и PNG V05_03 — сравним до/после кодера."
+                    Toast.makeText(this, "V0.5: MP4 + диагностические PNG сохранены", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Throwable) {
-                runOnUiThread { status.text = "Ошибка V0.4: ${e.javaClass.simpleName}: ${e.message}" }
+                runOnUiThread { status.text = "Ошибка V0.5: ${e.javaClass.simpleName}: ${e.message}" }
             }
         }
     }
@@ -274,22 +283,54 @@ class MainActivity : AppCompatActivity() {
     }
 
     private data class Sample(val data: ByteArray, val info: MediaCodec.BufferInfo)
+    private data class EncoderInfo(val codec: String, val colorFormat: Int, val width: Int, val height: Int)
 
-    private fun encodeMp4(frames: List<Bitmap>, audio: FloatArray, out: File) {
-        val w = frames[0].width; val h = frames[0].height
-        val vf = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, h)
-        vf.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
+    private fun align16(v: Int): Int = ((v + 15) / 16) * 16
+
+    private fun padToSize(src: Bitmap, w: Int, h: Int): Bitmap {
+        if (src.width == w && src.height == h) return src
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val c = Canvas(out)
+        c.drawColor(Color.BLACK)
+        c.drawBitmap(src, 0f, 0f, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+        return out
+    }
+
+    private fun chooseAvcEncoder(): Pair<MediaCodecInfo, Int> {
+        val infos = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+        val codec = infos.firstOrNull { info ->
+            info.isEncoder && info.supportedTypes.any { it.equals(MediaFormat.MIMETYPE_VIDEO_AVC, true) }
+        } ?: throw RuntimeException("AVC encoder не найден")
+        val colors = codec.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC).colorFormats.toSet()
+        val chosen = when {
+            colors.contains(MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar) -> MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
+            colors.contains(MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar) -> MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar
+            colors.contains(MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible) -> MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
+            else -> throw RuntimeException("Нет поддерживаемого ByteBuffer YUV420. Форматы: ${colors.joinToString()}")
+        }
+        return codec to chosen
+    }
+
+    private fun encodeMp4(frames: List<Bitmap>, audio: FloatArray, out: File): EncoderInfo {
+        val width = align16(frames[0].width)
+        val height = align16(frames[0].height)
+        val (codecInfo, colorFormat) = chooseAvcEncoder()
+
+        val vf = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height)
+        vf.setInteger(MediaFormat.KEY_COLOR_FORMAT, colorFormat)
         vf.setInteger(MediaFormat.KEY_BIT_RATE, 2_500_000)
         vf.setInteger(MediaFormat.KEY_FRAME_RATE, 25)
         vf.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-        val v = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-        v.configure(vf, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE); v.start()
+        val v = MediaCodec.createByCodecName(codecInfo.name)
+        v.configure(vf, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        v.start()
 
         val af = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, 16000, 1)
         af.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
         af.setInteger(MediaFormat.KEY_BIT_RATE, 64000)
         val a = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
-        a.configure(af, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE); a.start()
+        a.configure(af, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        a.start()
 
         val mux = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         var vt = -1; var at = -1; var muxStarted = false
@@ -297,9 +338,15 @@ class MainActivity : AppCompatActivity() {
 
         fun drain(codec: MediaCodec, isVideo: Boolean, eos: Boolean) {
             val info = MediaCodec.BufferInfo()
+            var idle = 0
             while (true) {
                 val ix = codec.dequeueOutputBuffer(info, if (eos) 10000 else 0)
-                if (ix == MediaCodec.INFO_TRY_AGAIN_LATER) { if (!eos) break else continue }
+                if (ix == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                    if (!eos) break
+                    if (++idle > 300) throw RuntimeException("Encoder EOS timeout")
+                    continue
+                }
+                idle = 0
                 if (ix == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     if (isVideo) vt = mux.addTrack(codec.outputFormat) else at = mux.addTrack(codec.outputFormat)
                     if (vt >= 0 && at >= 0 && !muxStarted) {
@@ -326,16 +373,24 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        for ((i, b) in frames.withIndex()) {
+        for ((i, src) in frames.withIndex()) {
+            val frame = padToSize(src, width, height)
+            val yuv = when (colorFormat) {
+                MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar -> toNv12(frame)
+                else -> toI420(frame)
+            }
+            if (frame !== src) frame.recycle()
             var ix = v.dequeueInputBuffer(10000)
             while (ix < 0) { drain(v, true, false); ix = v.dequeueInputBuffer(10000) }
-            val buf = v.getInputBuffer(ix)!!; val yuv = toI420(b)
+            val buf = v.getInputBuffer(ix)!!
+            if (buf.capacity() < yuv.size) throw RuntimeException("Video input buffer ${buf.capacity()} < ${yuv.size}")
             buf.clear(); buf.put(yuv)
             v.queueInputBuffer(ix, 0, yuv.size, i * 40000L, 0)
             drain(v, true, false)
         }
         var vix = v.dequeueInputBuffer(10000)
-        if (vix >= 0) v.queueInputBuffer(vix, 0, 0, frames.size * 40000L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+        while (vix < 0) { drain(v, true, false); vix = v.dequeueInputBuffer(10000) }
+        v.queueInputBuffer(vix, 0, 0, frames.size * 40000L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
 
         var pos = 0; val chunk = 1024
         while (pos < audio.size) {
@@ -343,36 +398,73 @@ class MainActivity : AppCompatActivity() {
             while (ai < 0) { drain(a, false, false); ai = a.dequeueInputBuffer(10000) }
             val n = min(chunk, audio.size - pos); val bb = a.getInputBuffer(ai)!!; bb.clear()
             for (j in 0 until n) {
-                val s = (audio[pos + j].coerceIn(-1f, 1f) * 32767).toInt().toShort()
-                bb.put((s.toInt() and 255).toByte()); bb.put(((s.toInt() shr 8) and 255).toByte())
+                val smp = (audio[pos + j].coerceIn(-1f, 1f) * 32767).toInt().toShort()
+                bb.put((smp.toInt() and 255).toByte()); bb.put(((smp.toInt() shr 8) and 255).toByte())
             }
             a.queueInputBuffer(ai, 0, n * 2, pos * 1_000_000L / 16000, 0)
             pos += n; drain(a, false, false)
         }
-        val aix = a.dequeueInputBuffer(10000)
-        if (aix >= 0) a.queueInputBuffer(aix, 0, 0, pos * 1_000_000L / 16000, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+        var aix = a.dequeueInputBuffer(10000)
+        while (aix < 0) { drain(a, false, false); aix = a.dequeueInputBuffer(10000) }
+        a.queueInputBuffer(aix, 0, 0, pos * 1_000_000L / 16000, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+
         drain(v, true, true); drain(a, false, true)
-        v.stop(); a.stop(); v.release(); a.release(); if (muxStarted) mux.stop(); mux.release()
+        v.stop(); a.stop(); v.release(); a.release()
+        if (muxStarted) mux.stop()
+        mux.release()
+        return EncoderInfo(codecInfo.name, colorFormat, width, height)
+    }
+
+    private fun rgbToYuv(c: Int): IntArray {
+        val r = Color.red(c); val g = Color.green(c); val b = Color.blue(c)
+        val y = (((66 * r + 129 * g + 25 * b + 128) shr 8) + 16).coerceIn(0, 255)
+        val u = (((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128).coerceIn(0, 255)
+        val v = (((112 * r - 94 * g - 18 * b + 128) shr 8) + 128).coerceIn(0, 255)
+        return intArrayOf(y, u, v)
     }
 
     private fun toI420(b: Bitmap): ByteArray {
         val w = b.width; val h = b.height
         val p = IntArray(w * h); b.getPixels(p, 0, w, 0, 0, w, h)
-        val out = ByteArray(w * h * 3 / 2); var yi = 0; var ui = w * h; var vi = ui + w * h / 4
+        val out = ByteArray(w * h * 3 / 2)
+        var yi = 0; var ui = w * h; var vi = ui + w * h / 4
         for (y in 0 until h) for (x in 0 until w) {
-            val c = p[y * w + x]; val r = Color.red(c); val g = Color.green(c); val bl = Color.blue(c)
-            out[yi++] = ((77 * r + 150 * g + 29 * bl) shr 8).coerceIn(0, 255).toByte()
-            if (y % 2 == 0 && x % 2 == 0) {
-                out[ui++] = (((-43 * r - 85 * g + 128 * bl) shr 8) + 128).coerceIn(0, 255).toByte()
-                out[vi++] = (((128 * r - 107 * g - 21 * bl) shr 8) + 128).coerceIn(0, 255).toByte()
-            }
+            val yy = rgbToYuv(p[y * w + x]); out[yi++] = yy[0].toByte()
+            if (y % 2 == 0 && x % 2 == 0) { out[ui++] = yy[1].toByte(); out[vi++] = yy[2].toByte() }
         }
         return out
     }
 
+    private fun toNv12(b: Bitmap): ByteArray {
+        val w = b.width; val h = b.height
+        val p = IntArray(w * h); b.getPixels(p, 0, w, 0, 0, w, h)
+        val out = ByteArray(w * h * 3 / 2)
+        var yi = 0; var uvi = w * h
+        for (y in 0 until h) for (x in 0 until w) {
+            val yy = rgbToYuv(p[y * w + x]); out[yi++] = yy[0].toByte()
+            if (y % 2 == 0 && x % 2 == 0) { out[uvi++] = yy[1].toByte(); out[uvi++] = yy[2].toByte() }
+        }
+        return out
+    }
+
+    private fun savePng(bitmap: Bitmap, fileName: String): Uri? {
+        return try {
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/DoramaAvatar")
+                }
+            }
+            val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+            contentResolver.openOutputStream(uri)!!.use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            uri
+        } catch (_: Throwable) { null }
+    }
+
     private fun saveMovie(f: File): Uri {
         val cv = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V04_${System.currentTimeMillis()}.mp4")
+            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V05_${System.currentTimeMillis()}.mp4")
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
             put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/DoramaAvatar")
         }
