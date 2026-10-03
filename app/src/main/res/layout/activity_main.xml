@@ -1,15 +1,19 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent">
 <LinearLayout android:orientation="vertical" android:padding="20dp" android:layout_width="match_parent" android:layout_height="wrap_content">
-<TextView android:text="Dorama Avatar • V0.8 CALIBRATION" android:textSize="24sp" android:textStyle="bold" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-<TextView android:id="@+id/status" android:text="Точная подгонка положения рта" android:paddingTop="12dp" android:paddingBottom="12dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<TextView android:text="Dorama Avatar • V0.9 XY CALIBRATION" android:textSize="24sp" android:textStyle="bold" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+<TextView android:id="@+id/status" android:text="Точная подгонка рта по X и Y" android:paddingTop="12dp" android:paddingBottom="12dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
 <ProgressBar android:id="@+id/progress" style="?android:attr/progressBarStyleHorizontal" android:max="100" android:progress="0" android:layout_width="match_parent" android:layout_height="wrap_content"/>
 <ImageView android:id="@+id/preview" android:layout_width="match_parent" android:layout_height="360dp" android:scaleType="centerCrop" android:background="#222222"/>
 <Button android:id="@+id/imageButton" android:text="1. Выбрать PNG/JPG" android:layout_width="match_parent" android:layout_height="wrap_content"/>
 <Button android:id="@+id/audioButton" android:text="2. Выбрать WAV" android:layout_width="match_parent" android:layout_height="wrap_content"/>
 <Button android:id="@+id/modelButton" android:text="3. Проверить / скачать Wav2Lip GAN 96" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-<TextView android:id="@+id/mouthOffsetLabel" android:text="Сдвиг рта: -4% (вверх)" android:textSize="17sp" android:textStyle="bold" android:paddingTop="14dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-<SeekBar android:id="@+id/mouthOffsetSeek" android:max="20" android:progress="6" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-<TextView android:text="Лево = выше • центр = 0% • право = ниже. Диапазон −10…+10%. Начальное значение −4%." android:textSize="13sp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-<Button android:id="@+id/generateButton" android:text="4. Создать MP4 с этим сдвигом" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-<TextView android:text="V0.8: модель V0.7 не меняем. Сужена зона смешивания до области рта и добавлена ручная вертикальная калибровка, чтобы больше не собирать новую версию ради нескольких пикселей." android:paddingTop="16dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-</LinearLayout></ScrollView>
+<TextView android:id="@+id/mouthOffsetXLabel" android:text="X: 0% (по центру)" android:textSize="17sp" android:textStyle="bold" android:paddingTop="14dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<SeekBar android:id="@+id/mouthOffsetXSeek" android:max="20" android:progress="10" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<TextView android:text="X: лево = −10% • центр = 0% • право = +10%" android:textSize="13sp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<TextView android:id="@+id/mouthOffsetYLabel" android:text="Y: -4% (вверх)" android:textSize="17sp" android:textStyle="bold" android:paddingTop="10dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<SeekBar android:id="@+id/mouthOffsetYSeek" android:max="20" android:progress="6" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<TextView android:text="Y: вверх = −10% • центр = 0% • вниз = +10%" android:textSize="13sp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<Button android:id="@+id/generateButton" android:text="4. Создать MP4 с этими X/Y" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<TextView android:text="V0.9: рабочую модель V0.7 и mel не меняем. Теперь рот можно двигать по двум осям без новой сборки. Старт: X=0%, Y=-4%." android:paddingTop="16dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+</LinearLayout>
+</ScrollView>
