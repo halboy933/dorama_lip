@@ -28,6 +28,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var preview: ImageView
     private lateinit var progress: ProgressBar
+    private lateinit var mouthOffsetLabel: TextView
+    private var mouthOffsetPercent: Int = -4
 
     private val imagePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
         u?.let {
@@ -49,6 +51,27 @@ class MainActivity : AppCompatActivity() {
         status = findViewById(R.id.status)
         preview = findViewById(R.id.preview)
         progress = findViewById(R.id.progress)
+        mouthOffsetLabel = findViewById(R.id.mouthOffsetLabel)
+        val mouthOffsetSeek = findViewById<SeekBar>(R.id.mouthOffsetSeek)
+        mouthOffsetSeek.progress = mouthOffsetPercent + 10
+        fun refreshMouthOffsetLabel() {
+            val direction = when {
+                mouthOffsetPercent < 0 -> "вверх"
+                mouthOffsetPercent > 0 -> "вниз"
+                else -> "без сдвига"
+            }
+            val signed = if (mouthOffsetPercent > 0) "+$mouthOffsetPercent" else "$mouthOffsetPercent"
+            mouthOffsetLabel.text = "Сдвиг рта: $signed% ($direction)"
+        }
+        refreshMouthOffsetLabel()
+        mouthOffsetSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progressValue: Int, fromUser: Boolean) {
+                mouthOffsetPercent = progressValue - 10
+                refreshMouthOffsetLabel()
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
         findViewById<Button>(R.id.imageButton).setOnClickListener { imagePicker.launch(arrayOf("image/*")) }
         findViewById<Button>(R.id.audioButton).setOnClickListener { audioPicker.launch(arrayOf("audio/*")) }
         findViewById<Button>(R.id.modelButton).setOnClickListener { downloadModel() }
@@ -204,7 +227,12 @@ class MainActivity : AppCompatActivity() {
      * V0.7: вставляем только нижнюю часть сгенерированного лица.
      * Глаза/волосы/фон остаются из оригинала. По краям мягкое feather-смешивание.
      */
-    private fun compositeLower(base: Bitmap, generated96: Bitmap, c: FaceCrop): Bitmap {
+    private fun compositeMouth(
+        base: Bitmap,
+        generated96: Bitmap,
+        c: FaceCrop,
+        offsetPercent: Int
+    ): Bitmap {
         val out = base.copy(Bitmap.Config.ARGB_8888, true)
         val generated = Bitmap.createScaledBitmap(generated96, c.width, c.height, true)
         val original = IntArray(c.width * c.height)
@@ -212,28 +240,40 @@ class MainActivity : AppCompatActivity() {
         out.getPixels(original, 0, c.width, c.left, c.top, c.width, c.height)
         generated.getPixels(gen, 0, c.width, 0, 0, c.width, c.height)
 
+        // V0.8: отрицательное значение поднимает сгенерированный рот.
+        val shiftPx = (c.height * offsetPercent / 100f).roundToInt()
+
         for (y in 0 until c.height) {
             val fy = y.toFloat() / max(1, c.height - 1)
-            // До ~42% высоты crop ничего не меняем; 42–58% — мягкий переход.
-            val vertical = smoothStep(0.42f, 0.58f, fy)
             for (x in 0 until c.width) {
-                if (vertical <= 0f) continue
                 val fx = x.toFloat() / max(1, c.width - 1)
-                val leftFeather = smoothStep(0.03f, 0.15f, fx)
-                val rightFeather = 1f - smoothStep(0.85f, 0.97f, fx)
-                val alpha = (vertical * min(leftFeather, rightFeather)).coerceIn(0f, 1f)
+
+                // Компактная эллиптическая область вокруг рта.
+                val dx = (fx - 0.50f) / 0.38f
+                val dy = (fy - 0.72f) / 0.22f
+                val d2 = dx * dx + dy * dy
+
+                val alpha = (1f - smoothStep(0.42f, 1.00f, d2)).coerceIn(0f, 1f)
                 if (alpha <= 0f) continue
-                val i = y * c.width + x
-                val a = original[i]
-                val g = gen[i]
-                fun mix(ca: Int, cg: Int) = (ca * (1f - alpha) + cg * alpha).roundToInt().coerceIn(0, 255)
-                original[i] = Color.rgb(
+
+                val srcY = (y - shiftPx).coerceIn(0, c.height - 1)
+                val srcX = x
+                val dstIndex = y * c.width + x
+                val srcIndex = srcY * c.width + srcX
+
+                val a = original[dstIndex]
+                val g = gen[srcIndex]
+                fun mix(ca: Int, cg: Int) =
+                    (ca * (1f - alpha) + cg * alpha).roundToInt().coerceIn(0, 255)
+
+                original[dstIndex] = Color.rgb(
                     mix(Color.red(a), Color.red(g)),
                     mix(Color.green(a), Color.green(g)),
                     mix(Color.blue(a), Color.blue(g))
                 )
             }
         }
+
         out.setPixels(original, 0, c.width, c.left, c.top, c.width, c.height)
         generated.recycle()
         return out
@@ -273,33 +313,33 @@ class MainActivity : AppCompatActivity() {
                             session.run(mapOf(melName to mt, imgName to img)).use { r -> outputBitmap(r[0].value) }
                         }
                     }
-                    val composed = compositeLower(base, face, crop)
+                    val composed = compositeMouth(base, face, crop, mouthOffsetPercent)
                     if (f == 0) {
                         val stamp = System.currentTimeMillis()
-                        savePng(crop.bitmap, "V07_01_input_crop_${stamp}.png")
-                        savePng(face, "V07_02_wav2lip_face_${stamp}.png")
-                        savePng(composed, "V07_03_composite_before_encoder_${stamp}.png")
+                        savePng(crop.bitmap, "V08_01_input_crop_${stamp}.png")
+                        savePng(face, "V08_02_wav2lip_face_${stamp}.png")
+                        savePng(composed, "V08_03_composite_before_encoder_${stamp}.png")
                     }
                     rendered.add(composed)
                     face.recycle()
                     if (f % 3 == 0) runOnUiThread {
                         progress.progress = 1 + f * 75 / frames
-                        status.text = "V0.7 lip-sync: ${f + 1}/$frames кадров"
+                        status.text = "V0.8 lip-sync: ${f + 1}/$frames кадров"
                     }
                 }
                 session.close()
-                val tmp = File(cacheDir, "v06_${System.currentTimeMillis()}.mp4")
+                val tmp = File(cacheDir, "v08_${System.currentTimeMillis()}.mp4")
                 val encoderInfo = encodeMp4(rendered, samples, tmp)
                 rendered.forEach { it.recycle() }
                 saveMovie(tmp)
                 val sec = (System.currentTimeMillis() - started) / 1000.0
                 runOnUiThread {
                     progress.progress = 100
-                    status.text = "✓ V0.7 ГОТОВА\n✓ PNG до кодирования сохранены в Pictures/DoramaAvatar\n✓ MP4: ${encoderInfo.width}x${encoderInfo.height}\n✓ AVC codec: ${encoderInfo.codec}\n✓ YUV format: ${encoderInfo.colorFormat}\n✓ $frames кадров / H.264 + AAC\n⏱ ${"%.1f".format(sec)} сек\n📁 Movies/DoramaAvatar\n\nПришли V07_02 и V07_03 PNG + MP4. Проверим сырой выход Wav2Lip с FaceFusion GAN 96 и auto-layout."
-                    Toast.makeText(this, "V0.7: MP4 + диагностические PNG сохранены", Toast.LENGTH_LONG).show()
+                    status.text = "✓ V0.8 ГОТОВА\n✓ PNG до кодирования сохранены в Pictures/DoramaAvatar\n✓ MP4: ${encoderInfo.width}x${encoderInfo.height}\n✓ AVC codec: ${encoderInfo.codec}\n✓ YUV format: ${encoderInfo.colorFormat}\n✓ $frames кадров / H.264 + AAC\n⏱ ${"%.1f".format(sec)} сек\n📁 Movies/DoramaAvatar\n\nСдвиг рта: ${mouthOffsetPercent}%\nПришли V08_03 + MP4, если нужна ещё подгонка."
+                    Toast.makeText(this, "V0.8: MP4 + PNG сохранены", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Throwable) {
-                runOnUiThread { status.text = "Ошибка V0.7: ${e.javaClass.simpleName}: ${e.message}" }
+                runOnUiThread { status.text = "Ошибка V0.8: ${e.javaClass.simpleName}: ${e.message}" }
             }
         }
     }
@@ -494,7 +534,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveMovie(f: File): Uri {
         val cv = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V07_${System.currentTimeMillis()}.mp4")
+            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V08_${System.currentTimeMillis()}.mp4")
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
             put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/DoramaAvatar")
         }
