@@ -78,8 +78,9 @@ class MainActivity : AppCompatActivity() {
         mouthAngleSeek.progress = (mouthAngleDeg + 12).coerceIn(0, 24)
         mouthScaleSeek.progress = (mouthScalePercent - 85).coerceIn(0, 30)
 
+        fun signed(v: Int): String = if (v > 0) "+$v" else "$v"
+
         fun refreshCalibrationLabels() {
-            fun signed(v: Int): String = if (v > 0) "+$v" else "$v"
             val xDir = when {
                 mouthOffsetXPercent < 0 -> "влево"
                 mouthOffsetXPercent > 0 -> "вправо"
@@ -313,60 +314,113 @@ class MainActivity : AppCompatActivity() {
         val out = base.copy(Bitmap.Config.ARGB_8888, true)
         val generated = Bitmap.createScaledBitmap(generated96, c.width, c.height, true)
 
-        val transformed = Bitmap.createBitmap(c.width, c.height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(transformed)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         val mouthCx = c.width * 0.50f
         val mouthCy = c.height * 0.72f
+        val shiftX = c.width * offsetXPercent / 100f
+        val shiftY = c.height * offsetYPercent / 100f
         val scale = scalePercent / 100f
 
-        val matrix = Matrix()
-        matrix.postScale(scale, scale, mouthCx, mouthCy)
-        matrix.postRotate(angleDeg.toFloat(), mouthCx, mouthCy)
-        canvas.drawBitmap(generated, matrix, paint)
+        // ВАЖНО: одна Matrix и для изображения, и для маски.
+        val transform = Matrix().apply {
+            postScale(scale, scale, mouthCx, mouthCy)
+            postRotate(angleDeg.toFloat(), mouthCx, mouthCy)
+            postTranslate(shiftX, shiftY)
+        }
 
-        val original = IntArray(c.width * c.height)
-        val gen = IntArray(c.width * c.height)
-        out.getPixels(original, 0, c.width, c.left, c.top, c.width, c.height)
-        transformed.getPixels(gen, 0, c.width, 0, 0, c.width, c.height)
+        val transformedFace = Bitmap.createBitmap(
+            c.width, c.height, Bitmap.Config.ARGB_8888
+        )
+        Canvas(transformedFace).drawBitmap(
+            generated,
+            transform,
+            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        )
 
-        val shiftX = (c.width * offsetXPercent / 100f).roundToInt()
-        val shiftY = (c.height * offsetYPercent / 100f).roundToInt()
+        // Исходная мягкая маска рта.
+        val baseMask = Bitmap.createBitmap(
+            c.width, c.height, Bitmap.Config.ARGB_8888
+        )
+        val maskPixels = IntArray(c.width * c.height)
 
         for (y in 0 until c.height) {
             val fy = y.toFloat() / max(1, c.height - 1)
             for (x in 0 until c.width) {
                 val fx = x.toFloat() / max(1, c.width - 1)
-
                 val dx = (fx - 0.50f) / 0.34f
                 val dy = (fy - 0.72f) / 0.19f
                 val d2 = dx * dx + dy * dy
-                val alpha = (1f - smoothStep(0.38f, 1.00f, d2)).coerceIn(0f, 1f)
-                if (alpha <= 0f) continue
 
-                val srcX = (x - shiftX).coerceIn(0, c.width - 1)
-                val srcY = (y - shiftY).coerceIn(0, c.height - 1)
-                val dstIndex = y * c.width + x
-                val srcIndex = srcY * c.width + srcX
+                val alpha = (
+                    (1f - smoothStep(0.38f, 1.00f, d2)) * 255f
+                ).roundToInt().coerceIn(0, 255)
 
-                val g = gen[srcIndex]
-                if (Color.alpha(g) == 0) continue
-
-                val a = original[dstIndex]
-                fun mix(ca: Int, cg: Int) =
-                    (ca * (1f - alpha) + cg * alpha).roundToInt().coerceIn(0, 255)
-
-                original[dstIndex] = Color.rgb(
-                    mix(Color.red(a), Color.red(g)),
-                    mix(Color.green(a), Color.green(g)),
-                    mix(Color.blue(a), Color.blue(g))
-                )
+                maskPixels[y * c.width + x] =
+                    Color.argb(alpha, 255, 255, 255)
             }
         }
 
-        out.setPixels(original, 0, c.width, c.left, c.top, c.width, c.height)
-        transformed.recycle()
+        baseMask.setPixels(
+            maskPixels, 0, c.width, 0, 0, c.width, c.height
+        )
+
+        // Та же Matrix двигает сам "кружок".
+        val transformedMask = Bitmap.createBitmap(
+            c.width, c.height, Bitmap.Config.ARGB_8888
+        )
+        Canvas(transformedMask).drawBitmap(
+            baseMask,
+            transform,
+            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        )
+
+        val original = IntArray(c.width * c.height)
+        val facePixels = IntArray(c.width * c.height)
+        val mask = IntArray(c.width * c.height)
+
+        out.getPixels(
+            original, 0, c.width,
+            c.left, c.top, c.width, c.height
+        )
+        transformedFace.getPixels(
+            facePixels, 0, c.width,
+            0, 0, c.width, c.height
+        )
+        transformedMask.getPixels(
+            mask, 0, c.width,
+            0, 0, c.width, c.height
+        )
+
+        for (i in original.indices) {
+            val alpha = Color.alpha(mask[i]) / 255f
+            if (alpha <= 0f) continue
+
+            val g = facePixels[i]
+            if (Color.alpha(g) == 0) continue
+
+            val a = original[i]
+
+            fun mix(ca: Int, cg: Int): Int =
+                (ca * (1f - alpha) + cg * alpha)
+                    .roundToInt()
+                    .coerceIn(0, 255)
+
+            original[i] = Color.rgb(
+                mix(Color.red(a), Color.red(g)),
+                mix(Color.green(a), Color.green(g)),
+                mix(Color.blue(a), Color.blue(g))
+            )
+        }
+
+        out.setPixels(
+            original, 0, c.width,
+            c.left, c.top, c.width, c.height
+        )
+
+        transformedMask.recycle()
+        baseMask.recycle()
+        transformedFace.recycle()
         generated.recycle()
+
         return out
     }
 
@@ -407,30 +461,30 @@ class MainActivity : AppCompatActivity() {
                     val composed = compositeMouth(base, face, crop, mouthOffsetXPercent, mouthOffsetYPercent, mouthAngleDeg, mouthScalePercent)
                     if (f == 0) {
                         val stamp = System.currentTimeMillis()
-                        savePng(crop.bitmap, "V10_01_input_crop_${stamp}.png")
-                        savePng(face, "V10_02_wav2lip_face_${stamp}.png")
-                        savePng(composed, "V10_03_composite_before_encoder_${stamp}.png")
+                        savePng(crop.bitmap, "V11_01_input_crop_${stamp}.png")
+                        savePng(face, "V11_02_wav2lip_face_${stamp}.png")
+                        savePng(composed, "V11_03_composite_before_encoder_${stamp}.png")
                     }
                     rendered.add(composed)
                     face.recycle()
                     if (f % 3 == 0) runOnUiThread {
                         progress.progress = 1 + f * 75 / frames
-                        status.text = "V1.0 lip-sync: ${f + 1}/$frames кадров"
+                        status.text = "V1.1 lip-sync: ${f + 1}/$frames кадров"
                     }
                 }
                 session.close()
-                val tmp = File(cacheDir, "v10_${System.currentTimeMillis()}.mp4")
+                val tmp = File(cacheDir, "v11_${System.currentTimeMillis()}.mp4")
                 val encoderInfo = encodeMp4(rendered, samples, tmp)
                 rendered.forEach { it.recycle() }
                 saveMovie(tmp)
                 val sec = (System.currentTimeMillis() - started) / 1000.0
                 runOnUiThread {
                     progress.progress = 100
-                    status.text = "✓ V1.0 ГОТОВА\n✓ PNG до кодирования сохранены в Pictures/DoramaAvatar\n✓ MP4: ${encoderInfo.width}x${encoderInfo.height}\n✓ AVC codec: ${encoderInfo.codec}\n✓ YUV format: ${encoderInfo.colorFormat}\n✓ $frames кадров / H.264 + AAC\n⏱ ${"%.1f".format(sec)} сек\n📁 Movies/DoramaAvatar\n\nX: ${mouthOffsetXPercent}% • Y: ${mouthOffsetYPercent}% • Angle: ${mouthAngleDeg}° • Scale: ${mouthScalePercent}%\nПришли V10_03 + MP4, если нужна ещё подгонка."
-                    Toast.makeText(this, "V1.0: MP4 + PNG сохранены", Toast.LENGTH_LONG).show()
+                    status.text = "✓ V1.1 ГОТОВА\n✓ PNG до кодирования сохранены в Pictures/DoramaAvatar\n✓ MP4: ${encoderInfo.width}x${encoderInfo.height}\n✓ AVC codec: ${encoderInfo.codec}\n✓ YUV format: ${encoderInfo.colorFormat}\n✓ $frames кадров / H.264 + AAC\n⏱ ${"%.1f".format(sec)} сек\n📁 Movies/DoramaAvatar\n\nX: ${mouthOffsetXPercent}% • Y: ${mouthOffsetYPercent}% • Angle: ${mouthAngleDeg}° • Scale: ${mouthScalePercent}%\nV1.1: рот и feather-mask двигаются вместе."
+                    Toast.makeText(this, "V1.1: MP4 + PNG сохранены", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Throwable) {
-                runOnUiThread { status.text = "Ошибка V1.0: ${e.javaClass.simpleName}: ${e.message}" }
+                runOnUiThread { status.text = "Ошибка V1.1: ${e.javaClass.simpleName}: ${e.message}" }
             }
         }
     }
@@ -625,7 +679,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveMovie(f: File): Uri {
         val cv = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V10_${System.currentTimeMillis()}.mp4")
+            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V11_${System.currentTimeMillis()}.mp4")
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
             put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/DoramaAvatar")
         }

@@ -1,29 +1,42 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
+
 <LinearLayout
     android:orientation="vertical"
     android:padding="20dp"
     android:layout_width="match_parent"
     android:layout_height="wrap_content">
 
-<TextView android:text="Dorama Avatar • V1.0 CALIBRATION"
-    android:textSize="24sp" android:textStyle="bold"
-    android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+<TextView
+    android:text="Dorama Avatar • V1.1 MOVING MASK"
+    android:textSize="24sp"
+    android:textStyle="bold"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"/>
 
-<TextView android:id="@+id/status"
-    android:text="Подгонка рта: X / Y / угол / размер"
-    android:paddingTop="12dp" android:paddingBottom="12dp"
-    android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<TextView
+    android:id="@+id/status"
+    android:text="Рот и мягкая маска теперь двигаются вместе"
+    android:paddingTop="12dp"
+    android:paddingBottom="12dp"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"/>
 
-<ProgressBar android:id="@+id/progress"
+<ProgressBar
+    android:id="@+id/progress"
     style="?android:attr/progressBarStyleHorizontal"
-    android:max="100" android:progress="0"
-    android:layout_width="match_parent" android:layout_height="wrap_content"/>
+    android:max="100"
+    android:progress="0"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"/>
 
-<ImageView android:id="@+id/preview"
-    android:layout_width="match_parent" android:layout_height="330dp"
-    android:scaleType="centerCrop" android:background="#222222"/>
+<ImageView
+    android:id="@+id/preview"
+    android:layout_width="match_parent"
+    android:layout_height="330dp"
+    android:scaleType="centerCrop"
+    android:background="#222222"/>
 
 <Button android:id="@+id/imageButton" android:text="1. Выбрать PNG/JPG"
     android:layout_width="match_parent" android:layout_height="wrap_content"/>
@@ -64,11 +77,16 @@
 <TextView android:text="Размер: 85% ... 100% ... 115%"
     android:textSize="12sp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
 
-<Button android:id="@+id/generateButton" android:text="4. Создать MP4 с этими настройками"
-    android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<Button android:id="@+id/generateButton"
+    android:text="4. Создать MP4 с этими настройками"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"/>
 
-<TextView android:text="Стартовый пресет: X=+10%, Y=-6%, угол=0°, размер=100%. Настройки запоминаются."
-    android:paddingTop="14dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<TextView
+    android:text="Старт: X=+10%, Y=-6%, угол=0°, размер=100%. Настройки сохраняются."
+    android:paddingTop="14dp"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"/>
 
 </LinearLayout>
 </ScrollView>
