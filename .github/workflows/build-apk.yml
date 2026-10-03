@@ -45,5 +45,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: DoramaAvatarLipSync-v1.1-stable
+          name: DoramaAvatarLipSync-v1.2-stable
           path: app/build/outputs/apk/debug/app-debug.apk

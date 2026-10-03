@@ -32,10 +32,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var mouthOffsetYLabel: TextView
     private lateinit var mouthAngleLabel: TextView
     private lateinit var mouthScaleLabel: TextView
-    private var mouthOffsetXPercent: Int = 10
+    private var mouthOffsetXPercent: Int = 15
     private var mouthOffsetYPercent: Int = -6
-    private var mouthAngleDeg: Int = 0
-    private var mouthScalePercent: Int = 100
+    private var mouthAngleDeg: Int = 3
+    private var mouthScalePercent: Int = 89
 
     private val imagePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
         u?.let {
@@ -63,10 +63,10 @@ class MainActivity : AppCompatActivity() {
         mouthScaleLabel = findViewById(R.id.mouthScaleLabel)
 
         val prefs = getSharedPreferences("dorama_avatar_calibration", MODE_PRIVATE)
-        mouthOffsetXPercent = prefs.getInt("mouth_x", 10)
+        mouthOffsetXPercent = prefs.getInt("mouth_x", 15)
         mouthOffsetYPercent = prefs.getInt("mouth_y", -6)
-        mouthAngleDeg = prefs.getInt("mouth_angle", 0)
-        mouthScalePercent = prefs.getInt("mouth_scale", 100)
+        mouthAngleDeg = prefs.getInt("mouth_angle", 3)
+        mouthScalePercent = prefs.getInt("mouth_scale", 89)
 
         val mouthOffsetXSeek = findViewById<SeekBar>(R.id.mouthOffsetXSeek)
         val mouthOffsetYSeek = findViewById<SeekBar>(R.id.mouthOffsetYSeek)
@@ -299,6 +299,67 @@ class MainActivity : AppCompatActivity() {
     }
 
     /*
+     * V1.2 QUALITY:
+     * лёгкая unsharp-маска после растягивания 96x96 на размер face crop.
+     * Усиливаем края губ, но не применяем резкость ко всему исходному кадру.
+     */
+    private fun sharpenGenerated(src: Bitmap, amount: Float = 0.48f): Bitmap {
+        val w = src.width
+        val h = src.height
+        if (w < 3 || h < 3) return src.copy(Bitmap.Config.ARGB_8888, true)
+
+        val input = IntArray(w * h)
+        val output = IntArray(w * h)
+        src.getPixels(input, 0, w, 0, 0, w, h)
+
+        // Края оставляем как есть.
+        input.copyInto(output)
+
+        fun sharpenChannel(center: Int, blur: Int): Int {
+            return (center + amount * (center - blur))
+                .roundToInt()
+                .coerceIn(0, 255)
+        }
+
+        for (y in 1 until h - 1) {
+            for (x in 1 until w - 1) {
+                val i = y * w + x
+                val c = input[i]
+                val l = input[i - 1]
+                val r = input[i + 1]
+                val u = input[i - w]
+                val d = input[i + w]
+
+                // Быстрый мягкий blur: центр имеет больший вес.
+                val br = (
+                    Color.red(c) * 4 +
+                    Color.red(l) + Color.red(r) +
+                    Color.red(u) + Color.red(d)
+                ) / 8
+                val bg = (
+                    Color.green(c) * 4 +
+                    Color.green(l) + Color.green(r) +
+                    Color.green(u) + Color.green(d)
+                ) / 8
+                val bb = (
+                    Color.blue(c) * 4 +
+                    Color.blue(l) + Color.blue(r) +
+                    Color.blue(u) + Color.blue(d)
+                ) / 8
+
+                output[i] = Color.argb(
+                    Color.alpha(c),
+                    sharpenChannel(Color.red(c), br),
+                    sharpenChannel(Color.green(c), bg),
+                    sharpenChannel(Color.blue(c), bb)
+                )
+            }
+        }
+
+        return Bitmap.createBitmap(output, w, h, Bitmap.Config.ARGB_8888)
+    }
+
+    /*
      * V0.7: вставляем только нижнюю часть сгенерированного лица.
      * Глаза/волосы/фон остаются из оригинала. По краям мягкое feather-смешивание.
      */
@@ -312,7 +373,9 @@ class MainActivity : AppCompatActivity() {
         scalePercent: Int
     ): Bitmap {
         val out = base.copy(Bitmap.Config.ARGB_8888, true)
-        val generated = Bitmap.createScaledBitmap(generated96, c.width, c.height, true)
+        val generatedScaled = Bitmap.createScaledBitmap(generated96, c.width, c.height, true)
+        val generated = sharpenGenerated(generatedScaled)
+        generatedScaled.recycle()
 
         val mouthCx = c.width * 0.50f
         val mouthCy = c.height * 0.72f
@@ -346,12 +409,16 @@ class MainActivity : AppCompatActivity() {
             val fy = y.toFloat() / max(1, c.height - 1)
             for (x in 0 until c.width) {
                 val fx = x.toFloat() / max(1, c.width - 1)
-                val dx = (fx - 0.50f) / 0.34f
-                val dy = (fy - 0.72f) / 0.19f
+                // V1.2: маска уже, чтобы не размягчать щёки/нос/подбородок.
+                // Центр тот же, поэтому выставленные X/Y/Angle/Scale не "съезжают".
+                val dx = (fx - 0.50f) / 0.30f
+                val dy = (fy - 0.72f) / 0.165f
                 val d2 = dx * dx + dy * dy
 
+                // В центре рот остаётся полностью сгенерированным,
+                // feather короче и заканчивается раньше.
                 val alpha = (
-                    (1f - smoothStep(0.38f, 1.00f, d2)) * 255f
+                    (1f - smoothStep(0.46f, 1.00f, d2)) * 255f
                 ).roundToInt().coerceIn(0, 255)
 
                 maskPixels[y * c.width + x] =
@@ -461,30 +528,30 @@ class MainActivity : AppCompatActivity() {
                     val composed = compositeMouth(base, face, crop, mouthOffsetXPercent, mouthOffsetYPercent, mouthAngleDeg, mouthScalePercent)
                     if (f == 0) {
                         val stamp = System.currentTimeMillis()
-                        savePng(crop.bitmap, "V11_01_input_crop_${stamp}.png")
-                        savePng(face, "V11_02_wav2lip_face_${stamp}.png")
-                        savePng(composed, "V11_03_composite_before_encoder_${stamp}.png")
+                        savePng(crop.bitmap, "V12_01_input_crop_${stamp}.png")
+                        savePng(face, "V12_02_wav2lip_face_${stamp}.png")
+                        savePng(composed, "V12_03_composite_before_encoder_${stamp}.png")
                     }
                     rendered.add(composed)
                     face.recycle()
                     if (f % 3 == 0) runOnUiThread {
                         progress.progress = 1 + f * 75 / frames
-                        status.text = "V1.1 lip-sync: ${f + 1}/$frames кадров"
+                        status.text = "V1.2 lip-sync: ${f + 1}/$frames кадров"
                     }
                 }
                 session.close()
-                val tmp = File(cacheDir, "v11_${System.currentTimeMillis()}.mp4")
+                val tmp = File(cacheDir, "v12_${System.currentTimeMillis()}.mp4")
                 val encoderInfo = encodeMp4(rendered, samples, tmp)
                 rendered.forEach { it.recycle() }
                 saveMovie(tmp)
                 val sec = (System.currentTimeMillis() - started) / 1000.0
                 runOnUiThread {
                     progress.progress = 100
-                    status.text = "✓ V1.1 ГОТОВА\n✓ PNG до кодирования сохранены в Pictures/DoramaAvatar\n✓ MP4: ${encoderInfo.width}x${encoderInfo.height}\n✓ AVC codec: ${encoderInfo.codec}\n✓ YUV format: ${encoderInfo.colorFormat}\n✓ $frames кадров / H.264 + AAC\n⏱ ${"%.1f".format(sec)} сек\n📁 Movies/DoramaAvatar\n\nX: ${mouthOffsetXPercent}% • Y: ${mouthOffsetYPercent}% • Angle: ${mouthAngleDeg}° • Scale: ${mouthScalePercent}%\nV1.1: рот и feather-mask двигаются вместе."
-                    Toast.makeText(this, "V1.1: MP4 + PNG сохранены", Toast.LENGTH_LONG).show()
+                    status.text = "✓ V1.2 ГОТОВА\n✓ PNG до кодирования сохранены в Pictures/DoramaAvatar\n✓ MP4: ${encoderInfo.width}x${encoderInfo.height}\n✓ AVC codec: ${encoderInfo.codec}\n✓ YUV format: ${encoderInfo.colorFormat}\n✓ $frames кадров / H.264 + AAC\n⏱ ${"%.1f".format(sec)} сек\n📁 Movies/DoramaAvatar\n\nX: ${mouthOffsetXPercent}% • Y: ${mouthOffsetYPercent}% • Angle: ${mouthAngleDeg}° • Scale: ${mouthScalePercent}%\nV1.2: moving-mask сохранена; зона губ уже + лёгкая резкость."
+                    Toast.makeText(this, "V1.2: MP4 + PNG сохранены", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Throwable) {
-                runOnUiThread { status.text = "Ошибка V1.1: ${e.javaClass.simpleName}: ${e.message}" }
+                runOnUiThread { status.text = "Ошибка V1.2: ${e.javaClass.simpleName}: ${e.message}" }
             }
         }
     }
@@ -679,7 +746,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveMovie(f: File): Uri {
         val cv = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V11_${System.currentTimeMillis()}.mp4")
+            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V12_${System.currentTimeMillis()}.mp4")
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
             put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/DoramaAvatar")
         }
