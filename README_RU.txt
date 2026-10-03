@@ -1,18 +1,19 @@
-Dorama Avatar LipSync v0.5 — диагностическая версия
+Dorama Avatar LipSync V0.6 — диагностическая версия
 
-Цель: отделить качество Wav2Lip/paste-back от ошибок Android H.264 encoder.
+Что исправлено после V0.5:
+1) аудио-признаки приведены к официальному пайплайну Wav2Lip:
+   - 16 kHz PCM;
+   - pre-emphasis 0.97;
+   - centered STFT n_fft=800 / hop=200 / win=800;
+   - periodic Hann window;
+   - Slaney mel scale, 80 bands, 55..7600 Hz, area normalization;
+   - amplitude -> dB, ref_level_db=20;
+   - нормализация в диапазон [-4, +4].
+2) изображение подаётся в модель в BGR, как в оригинальном OpenCV pipeline.
+3) выход модели переводится BGR -> RGB перед Bitmap.
+4) сохраняются PNG диагностики V06_01 / V06_02 / V06_03.
+5) MP4 и paste-back оставлены без принципиальных изменений, чтобы изолировать причину.
 
-Что нового:
-1) сохраняет первый input crop PNG;
-2) сохраняет первый raw Wav2Lip face PNG;
-3) сохраняет composite frame PNG ДО кодирования;
-4) размер MP4 выравнивается до кратного 16 без растяжения — добавляется только чёрный padding справа/снизу при необходимости;
-5) приложение определяет AVC encoder и выбирает реально заявленный YUV420 ByteBuffer format;
-6) для SemiPlanar подаётся NV12, для Planar/Flexible — I420;
-7) в финальном статусе показываются codec, color format и размер MP4.
+ВАЖНО: для теста выбирайте ОРИГИНАЛЬНУЮ картинку аватара, а не скриншот приложения.
 
-Диагностические PNG: Pictures/DoramaAvatar
-Видео: Movies/DoramaAvatar
-
-Если V05_03_composite_before_encoder выглядит правильно, а MP4 повреждён — проблема точно в MediaCodec/YUV.
-Если уже V05_02/V05_03 неправильные — исправляем Wav2Lip crop/paste-back, не трогая encoder.
+Wav2Lip weights используются только для технического некоммерческого теста.

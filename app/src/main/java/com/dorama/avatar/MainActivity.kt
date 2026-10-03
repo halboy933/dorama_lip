@@ -109,7 +109,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /*
-     * V0.5: не берём огромный квадрат 1.5x вокруг лица.
+     * V0.6: не берём огромный квадрат 1.5x вокруг лица.
      * Используем сам face box с небольшими полями, как ближе к пайплайну Wav2Lip.
      */
     private fun cropInfo(b: Bitmap, r: Rect): FaceCrop {
@@ -130,6 +130,10 @@ class MainActivity : AppCompatActivity() {
      * Wav2Lip ожидает, что у masked-копии занулена НИЖНЯЯ половина лица.
      * В V0.3 была занулена верхняя половина, поэтому верх кадра превращался в мусор.
      */
+    /*
+     * Оригинальный Wav2Lip получает изображения через OpenCV (BGR),
+     * затем NHWC -> NCHW. Поэтому в Android явно подаём B,G,R.
+     */
     private fun imageTensor(b: Bitmap): FloatArray {
         val pix = IntArray(96 * 96)
         b.getPixels(pix, 0, 96, 0, 0, 96, 96)
@@ -137,17 +141,22 @@ class MainActivity : AppCompatActivity() {
         for (y in 0 until 96) {
             for (x in 0 until 96) {
                 val p = pix[y * 96 + x]
-                val rgb = floatArrayOf(Color.red(p) / 255f, Color.green(p) / 255f, Color.blue(p) / 255f)
+                val bgr = floatArrayOf(
+                    Color.blue(p) / 255f,
+                    Color.green(p) / 255f,
+                    Color.red(p) / 255f
+                )
                 for (c in 0..2) {
-                    val v = rgb[c]
-                    out[c * 96 * 96 + y * 96 + x] = if (y >= 48) 0f else v
-                    out[(c + 3) * 96 * 96 + y * 96 + x] = v
+                    val value = bgr[c]
+                    out[c * 96 * 96 + y * 96 + x] = if (y >= 48) 0f else value
+                    out[(c + 3) * 96 * 96 + y * 96 + x] = value
                 }
             }
         }
         return out
     }
 
+    /* Выход модели тоже BGR NCHW; Bitmap ожидает RGB. */
     private fun outputBitmap(v: Any): Bitmap {
         val a = v as Array<*>
         val c = a[0] as Array<*>
@@ -158,7 +167,7 @@ class MainActivity : AppCompatActivity() {
                 val row = (c[k] as Array<*>)[y] as FloatArray
                 return (row[x].coerceIn(0f, 1f) * 255f).roundToInt()
             }
-            pix[y * 96 + x] = Color.rgb(ch(0), ch(1), ch(2))
+            pix[y * 96 + x] = Color.rgb(ch(2), ch(1), ch(0))
         }
         out.setPixels(pix, 0, 96, 0, 0, 96, 96)
         return out
@@ -171,7 +180,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /*
-     * V0.5: вставляем только нижнюю часть сгенерированного лица.
+     * V0.6: вставляем только нижнюю часть сгенерированного лица.
      * Глаза/волосы/фон остаются из оригинала. По краям мягкое feather-смешивание.
      */
     private fun compositeLower(base: Bitmap, generated96: Bitmap, c: FaceCrop): Bitmap {
@@ -246,30 +255,30 @@ class MainActivity : AppCompatActivity() {
                     val composed = compositeLower(base, face, crop)
                     if (f == 0) {
                         val stamp = System.currentTimeMillis()
-                        savePng(crop.bitmap, "V05_01_input_crop_${stamp}.png")
-                        savePng(face, "V05_02_wav2lip_face_${stamp}.png")
-                        savePng(composed, "V05_03_composite_before_encoder_${stamp}.png")
+                        savePng(crop.bitmap, "V06_01_input_crop_${stamp}.png")
+                        savePng(face, "V06_02_wav2lip_face_${stamp}.png")
+                        savePng(composed, "V06_03_composite_before_encoder_${stamp}.png")
                     }
                     rendered.add(composed)
                     face.recycle()
                     if (f % 3 == 0) runOnUiThread {
                         progress.progress = 1 + f * 75 / frames
-                        status.text = "V0.5 lip-sync: ${f + 1}/$frames кадров"
+                        status.text = "V0.6 lip-sync: ${f + 1}/$frames кадров"
                     }
                 }
                 session.close()
-                val tmp = File(cacheDir, "v05_${System.currentTimeMillis()}.mp4")
+                val tmp = File(cacheDir, "v06_${System.currentTimeMillis()}.mp4")
                 val encoderInfo = encodeMp4(rendered, samples, tmp)
                 rendered.forEach { it.recycle() }
                 saveMovie(tmp)
                 val sec = (System.currentTimeMillis() - started) / 1000.0
                 runOnUiThread {
                     progress.progress = 100
-                    status.text = "✓ V0.5 ГОТОВА\n✓ PNG до кодирования сохранены в Pictures/DoramaAvatar\n✓ MP4: ${encoderInfo.width}x${encoderInfo.height}\n✓ AVC codec: ${encoderInfo.codec}\n✓ YUV format: ${encoderInfo.colorFormat}\n✓ $frames кадров / H.264 + AAC\n⏱ ${"%.1f".format(sec)} сек\n📁 Movies/DoramaAvatar\n\nПришли MP4 и PNG V05_03 — сравним до/после кодера."
-                    Toast.makeText(this, "V0.5: MP4 + диагностические PNG сохранены", Toast.LENGTH_LONG).show()
+                    status.text = "✓ V0.6 ГОТОВА\n✓ PNG до кодирования сохранены в Pictures/DoramaAvatar\n✓ MP4: ${encoderInfo.width}x${encoderInfo.height}\n✓ AVC codec: ${encoderInfo.codec}\n✓ YUV format: ${encoderInfo.colorFormat}\n✓ $frames кадров / H.264 + AAC\n⏱ ${"%.1f".format(sec)} сек\n📁 Movies/DoramaAvatar\n\nПришли V06_02 и V06_03 PNG + MP4. Проверим сырой выход Wav2Lip после точного mel/BGR."
+                    Toast.makeText(this, "V0.6: MP4 + диагностические PNG сохранены", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Throwable) {
-                runOnUiThread { status.text = "Ошибка V0.5: ${e.javaClass.simpleName}: ${e.message}" }
+                runOnUiThread { status.text = "Ошибка V0.6: ${e.javaClass.simpleName}: ${e.message}" }
             }
         }
     }
@@ -464,7 +473,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveMovie(f: File): Uri {
         val cv = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V05_${System.currentTimeMillis()}.mp4")
+            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V06_${System.currentTimeMillis()}.mp4")
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
             put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/DoramaAvatar")
         }
