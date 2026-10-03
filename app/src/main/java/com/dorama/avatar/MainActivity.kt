@@ -55,7 +55,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.generateButton).setOnClickListener { generate() }
     }
 
-    private fun modelFile() = File(filesDir, "wav2lip.onnx")
+    private fun modelFile() = File(filesDir, "wav2lip_facefusion_gan96.onnx")
 
     private fun downloadModel() {
         if (modelFile().exists() && modelFile().length() > 100_000_000) {
@@ -64,8 +64,8 @@ class MainActivity : AppCompatActivity() {
         }
         thread {
             try {
-                runOnUiThread { status.text = "Скачиваю модель…"; progress.progress = 0 }
-                val c = URL("https://huggingface.co/bluefoxcreation/Wav2lip-Onnx/resolve/main/wav2lip.onnx?download=true").openConnection()
+                runOnUiThread { status.text = "Скачиваю FaceFusion Wav2Lip GAN 96…"; progress.progress = 0 }
+                val c = URL("https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/wav2lip_gan_96.onnx").openConnection()
                 val total = c.contentLengthLong
                 c.getInputStream().use { input ->
                     modelFile().outputStream().use { out ->
@@ -79,7 +79,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
-                runOnUiThread { status.text = "✓ Модель готова" }
+                runOnUiThread { status.text = "✓ FaceFusion Wav2Lip GAN 96 готова" }
             } catch (e: Throwable) {
                 runOnUiThread { status.text = "Ошибка модели: ${e.message}" }
             }
@@ -109,16 +109,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     /*
-     * V0.6: не берём огромный квадрат 1.5x вокруг лица.
+     * V0.7: не берём огромный квадрат 1.5x вокруг лица.
      * Используем сам face box с небольшими полями, как ближе к пайплайну Wav2Lip.
      */
     private fun cropInfo(b: Bitmap, r: Rect): FaceCrop {
-        val fw = r.width().coerceAtLeast(1)
-        val fh = r.height().coerceAtLeast(1)
-        val left = (r.left - fw * 0.12f).roundToInt().coerceAtLeast(0)
-        val right = (r.right + fw * 0.12f).roundToInt().coerceAtMost(b.width)
-        val top = (r.top - fh * 0.10f).roundToInt().coerceAtLeast(0)
-        val bottom = (r.bottom + fh * 0.18f).roundToInt().coerceAtMost(b.height)
+        // Ближе к оригинальному Wav2Lip: face box + только нижний pad 10 px.
+        val left = r.left.coerceIn(0, b.width - 2)
+        val right = r.right.coerceIn(left + 2, b.width)
+        val top = r.top.coerceIn(0, b.height - 2)
+        val bottom = (r.bottom + 10).coerceIn(top + 2, b.height)
         val w = (right - left).coerceAtLeast(2)
         val h = (bottom - top).coerceAtLeast(2)
         val raw = Bitmap.createBitmap(b, left, top, w, h)
@@ -156,18 +155,40 @@ class MainActivity : AppCompatActivity() {
         return out
     }
 
-    /* Выход модели тоже BGR NCHW; Bitmap ожидает RGB. */
+    /*
+     * V0.7: не предполагаем layout выхода ONNX заранее.
+     * Поддерживаем [1,3,96,96] (NCHW) и [1,96,96,3] (NHWC).
+     * Каналы модели BGR, Bitmap ожидает RGB.
+     */
     private fun outputBitmap(v: Any): Bitmap {
-        val a = v as Array<*>
-        val c = a[0] as Array<*>
+        val batch = v as? Array<*> ?: throw RuntimeException("ONNX output: не Array")
+        val first = batch.firstOrNull() as? Array<*> ?: throw RuntimeException("ONNX output: пустой batch")
         val out = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
         val pix = IntArray(96 * 96)
-        for (y in 0 until 96) for (x in 0 until 96) {
-            fun ch(k: Int): Int {
-                val row = (c[k] as Array<*>)[y] as FloatArray
-                return (row[x].coerceIn(0f, 1f) * 255f).roundToInt()
+
+        if (first.size == 3) {
+            // NCHW: [1][3][96][96]
+            for (y in 0 until 96) for (x in 0 until 96) {
+                fun ch(k: Int): Int {
+                    val row = (first[k] as Array<*>)[y] as FloatArray
+                    return (row[x].coerceIn(0f, 1f) * 255f).roundToInt()
+                }
+                pix[y * 96 + x] = Color.rgb(ch(2), ch(1), ch(0))
             }
-            pix[y * 96 + x] = Color.rgb(ch(2), ch(1), ch(0))
+        } else if (first.size == 96) {
+            // NHWC: [1][96][96][3]
+            for (y in 0 until 96) {
+                val row = first[y] as Array<*>
+                for (x in 0 until 96) {
+                    val bgr = row[x] as FloatArray
+                    val b = (bgr[0].coerceIn(0f, 1f) * 255f).roundToInt()
+                    val g = (bgr[1].coerceIn(0f, 1f) * 255f).roundToInt()
+                    val r = (bgr[2].coerceIn(0f, 1f) * 255f).roundToInt()
+                    pix[y * 96 + x] = Color.rgb(r, g, b)
+                }
+            }
+        } else {
+            throw RuntimeException("Неизвестный ONNX output layout: first=${first.size}")
         }
         out.setPixels(pix, 0, 96, 0, 0, 96, 96)
         return out
@@ -180,7 +201,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /*
-     * V0.6: вставляем только нижнюю часть сгенерированного лица.
+     * V0.7: вставляем только нижнюю часть сгенерированного лица.
      * Глаза/волосы/фон остаются из оригинала. По краям мягкое feather-смешивание.
      */
     private fun compositeLower(base: Bitmap, generated96: Bitmap, c: FaceCrop): Bitmap {
@@ -236,8 +257,8 @@ class MainActivity : AppCompatActivity() {
                 val env = OrtEnvironment.getEnvironment()
                 val session = env.createSession(modelFile().absolutePath, OrtSession.SessionOptions())
                 val names = session.inputNames.toList()
-                val melName = names.firstOrNull { it.contains("mel", true) } ?: names[0]
-                val imgName = names.firstOrNull { it.contains("video", true) || it.contains("frame", true) || it.contains("img", true) } ?: names.last()
+                val melName = names.firstOrNull { it.contains("mel", true) || it.contains("audio", true) || it.contains("source", true) } ?: names[0]
+                val imgName = names.firstOrNull { it.contains("video", true) || it.contains("frame", true) || it.contains("img", true) || it.contains("face", true) || it.contains("target", true) } ?: names.last()
                 val imageInput = imageTensor(crop.bitmap)
                 val rendered = ArrayList<Bitmap>(frames)
 
@@ -255,15 +276,15 @@ class MainActivity : AppCompatActivity() {
                     val composed = compositeLower(base, face, crop)
                     if (f == 0) {
                         val stamp = System.currentTimeMillis()
-                        savePng(crop.bitmap, "V06_01_input_crop_${stamp}.png")
-                        savePng(face, "V06_02_wav2lip_face_${stamp}.png")
-                        savePng(composed, "V06_03_composite_before_encoder_${stamp}.png")
+                        savePng(crop.bitmap, "V07_01_input_crop_${stamp}.png")
+                        savePng(face, "V07_02_wav2lip_face_${stamp}.png")
+                        savePng(composed, "V07_03_composite_before_encoder_${stamp}.png")
                     }
                     rendered.add(composed)
                     face.recycle()
                     if (f % 3 == 0) runOnUiThread {
                         progress.progress = 1 + f * 75 / frames
-                        status.text = "V0.6 lip-sync: ${f + 1}/$frames кадров"
+                        status.text = "V0.7 lip-sync: ${f + 1}/$frames кадров"
                     }
                 }
                 session.close()
@@ -274,11 +295,11 @@ class MainActivity : AppCompatActivity() {
                 val sec = (System.currentTimeMillis() - started) / 1000.0
                 runOnUiThread {
                     progress.progress = 100
-                    status.text = "✓ V0.6 ГОТОВА\n✓ PNG до кодирования сохранены в Pictures/DoramaAvatar\n✓ MP4: ${encoderInfo.width}x${encoderInfo.height}\n✓ AVC codec: ${encoderInfo.codec}\n✓ YUV format: ${encoderInfo.colorFormat}\n✓ $frames кадров / H.264 + AAC\n⏱ ${"%.1f".format(sec)} сек\n📁 Movies/DoramaAvatar\n\nПришли V06_02 и V06_03 PNG + MP4. Проверим сырой выход Wav2Lip после точного mel/BGR."
-                    Toast.makeText(this, "V0.6: MP4 + диагностические PNG сохранены", Toast.LENGTH_LONG).show()
+                    status.text = "✓ V0.7 ГОТОВА\n✓ PNG до кодирования сохранены в Pictures/DoramaAvatar\n✓ MP4: ${encoderInfo.width}x${encoderInfo.height}\n✓ AVC codec: ${encoderInfo.codec}\n✓ YUV format: ${encoderInfo.colorFormat}\n✓ $frames кадров / H.264 + AAC\n⏱ ${"%.1f".format(sec)} сек\n📁 Movies/DoramaAvatar\n\nПришли V07_02 и V07_03 PNG + MP4. Проверим сырой выход Wav2Lip с FaceFusion GAN 96 и auto-layout."
+                    Toast.makeText(this, "V0.7: MP4 + диагностические PNG сохранены", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Throwable) {
-                runOnUiThread { status.text = "Ошибка V0.6: ${e.javaClass.simpleName}: ${e.message}" }
+                runOnUiThread { status.text = "Ошибка V0.7: ${e.javaClass.simpleName}: ${e.message}" }
             }
         }
     }
@@ -473,7 +494,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveMovie(f: File): Uri {
         val cv = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V06_${System.currentTimeMillis()}.mp4")
+            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V07_${System.currentTimeMillis()}.mp4")
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
             put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/DoramaAvatar")
         }
