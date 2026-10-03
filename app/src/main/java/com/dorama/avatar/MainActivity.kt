@@ -30,8 +30,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var progress: ProgressBar
     private lateinit var mouthOffsetXLabel: TextView
     private lateinit var mouthOffsetYLabel: TextView
-    private var mouthOffsetXPercent: Int = 0
-    private var mouthOffsetYPercent: Int = -4
+    private lateinit var mouthAngleLabel: TextView
+    private lateinit var mouthScaleLabel: TextView
+    private var mouthOffsetXPercent: Int = 10
+    private var mouthOffsetYPercent: Int = -6
+    private var mouthAngleDeg: Int = 0
+    private var mouthScalePercent: Int = 100
 
     private val imagePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
         u?.let {
@@ -55,47 +59,89 @@ class MainActivity : AppCompatActivity() {
         progress = findViewById(R.id.progress)
         mouthOffsetXLabel = findViewById(R.id.mouthOffsetXLabel)
         mouthOffsetYLabel = findViewById(R.id.mouthOffsetYLabel)
+        mouthAngleLabel = findViewById(R.id.mouthAngleLabel)
+        mouthScaleLabel = findViewById(R.id.mouthScaleLabel)
+
+        val prefs = getSharedPreferences("dorama_avatar_calibration", MODE_PRIVATE)
+        mouthOffsetXPercent = prefs.getInt("mouth_x", 10)
+        mouthOffsetYPercent = prefs.getInt("mouth_y", -6)
+        mouthAngleDeg = prefs.getInt("mouth_angle", 0)
+        mouthScalePercent = prefs.getInt("mouth_scale", 100)
+
         val mouthOffsetXSeek = findViewById<SeekBar>(R.id.mouthOffsetXSeek)
         val mouthOffsetYSeek = findViewById<SeekBar>(R.id.mouthOffsetYSeek)
-        mouthOffsetXSeek.progress = mouthOffsetXPercent + 10
-        mouthOffsetYSeek.progress = mouthOffsetYPercent + 10
+        val mouthAngleSeek = findViewById<SeekBar>(R.id.mouthAngleSeek)
+        val mouthScaleSeek = findViewById<SeekBar>(R.id.mouthScaleSeek)
 
-        fun refreshXLabel() {
-            val direction = when {
+        mouthOffsetXSeek.progress = (mouthOffsetXPercent + 20).coerceIn(0, 40)
+        mouthOffsetYSeek.progress = (mouthOffsetYPercent + 15).coerceIn(0, 30)
+        mouthAngleSeek.progress = (mouthAngleDeg + 12).coerceIn(0, 24)
+        mouthScaleSeek.progress = (mouthScalePercent - 85).coerceIn(0, 30)
+
+        fun refreshCalibrationLabels() {
+            fun signed(v: Int): String = if (v > 0) "+$v" else "$v"
+            val xDir = when {
                 mouthOffsetXPercent < 0 -> "влево"
                 mouthOffsetXPercent > 0 -> "вправо"
-                else -> "по центру"
+                else -> "центр"
             }
-            val signed = if (mouthOffsetXPercent > 0) "+$mouthOffsetXPercent" else "$mouthOffsetXPercent"
-            mouthOffsetXLabel.text = "X: $signed% ($direction)"
-        }
-
-        fun refreshYLabel() {
-            val direction = when {
+            val yDir = when {
                 mouthOffsetYPercent < 0 -> "вверх"
                 mouthOffsetYPercent > 0 -> "вниз"
-                else -> "по центру"
+                else -> "центр"
             }
-            val signed = if (mouthOffsetYPercent > 0) "+$mouthOffsetYPercent" else "$mouthOffsetYPercent"
-            mouthOffsetYLabel.text = "Y: $signed% ($direction)"
+            mouthOffsetXLabel.text = "X: ${signed(mouthOffsetXPercent)}% ($xDir)"
+            mouthOffsetYLabel.text = "Y: ${signed(mouthOffsetYPercent)}% ($yDir)"
+            mouthAngleLabel.text = "Угол: ${signed(mouthAngleDeg)}°"
+            mouthScaleLabel.text = "Размер: ${mouthScalePercent}%"
         }
 
-        refreshXLabel()
-        refreshYLabel()
+        fun saveCalibration() {
+            prefs.edit()
+                .putInt("mouth_x", mouthOffsetXPercent)
+                .putInt("mouth_y", mouthOffsetYPercent)
+                .putInt("mouth_angle", mouthAngleDeg)
+                .putInt("mouth_scale", mouthScalePercent)
+                .apply()
+        }
+
+        refreshCalibrationLabels()
 
         mouthOffsetXSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progressValue: Int, fromUser: Boolean) {
-                mouthOffsetXPercent = progressValue - 10
-                refreshXLabel()
+            override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
+                mouthOffsetXPercent = value - 20
+                refreshCalibrationLabels()
+                if (fromUser) saveCalibration()
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
         mouthOffsetYSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progressValue: Int, fromUser: Boolean) {
-                mouthOffsetYPercent = progressValue - 10
-                refreshYLabel()
+            override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
+                mouthOffsetYPercent = value - 15
+                refreshCalibrationLabels()
+                if (fromUser) saveCalibration()
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        mouthAngleSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
+                mouthAngleDeg = value - 12
+                refreshCalibrationLabels()
+                if (fromUser) saveCalibration()
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        mouthScaleSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
+                mouthScalePercent = 85 + value
+                refreshCalibrationLabels()
+                if (fromUser) saveCalibration()
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
@@ -260,18 +306,30 @@ class MainActivity : AppCompatActivity() {
         generated96: Bitmap,
         c: FaceCrop,
         offsetXPercent: Int,
-        offsetYPercent: Int
+        offsetYPercent: Int,
+        angleDeg: Int,
+        scalePercent: Int
     ): Bitmap {
         val out = base.copy(Bitmap.Config.ARGB_8888, true)
         val generated = Bitmap.createScaledBitmap(generated96, c.width, c.height, true)
+
+        val transformed = Bitmap.createBitmap(c.width, c.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(transformed)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        val mouthCx = c.width * 0.50f
+        val mouthCy = c.height * 0.72f
+        val scale = scalePercent / 100f
+
+        val matrix = Matrix()
+        matrix.postScale(scale, scale, mouthCx, mouthCy)
+        matrix.postRotate(angleDeg.toFloat(), mouthCx, mouthCy)
+        canvas.drawBitmap(generated, matrix, paint)
+
         val original = IntArray(c.width * c.height)
         val gen = IntArray(c.width * c.height)
         out.getPixels(original, 0, c.width, c.left, c.top, c.width, c.height)
-        generated.getPixels(gen, 0, c.width, 0, 0, c.width, c.height)
+        transformed.getPixels(gen, 0, c.width, 0, 0, c.width, c.height)
 
-        // V0.9: независимый сдвиг по X и Y.
-        // Отрицательный X = влево, положительный X = вправо.
-        // Отрицательный Y = вверх, положительный Y = вниз.
         val shiftX = (c.width * offsetXPercent / 100f).roundToInt()
         val shiftY = (c.height * offsetYPercent / 100f).roundToInt()
 
@@ -280,21 +338,21 @@ class MainActivity : AppCompatActivity() {
             for (x in 0 until c.width) {
                 val fx = x.toFloat() / max(1, c.width - 1)
 
-                // Компактная эллиптическая область вокруг рта.
-                val dx = (fx - 0.50f) / 0.38f
-                val dy = (fy - 0.72f) / 0.22f
+                val dx = (fx - 0.50f) / 0.34f
+                val dy = (fy - 0.72f) / 0.19f
                 val d2 = dx * dx + dy * dy
-
-                val alpha = (1f - smoothStep(0.42f, 1.00f, d2)).coerceIn(0f, 1f)
+                val alpha = (1f - smoothStep(0.38f, 1.00f, d2)).coerceIn(0f, 1f)
                 if (alpha <= 0f) continue
 
-                val srcY = (y - shiftY).coerceIn(0, c.height - 1)
                 val srcX = (x - shiftX).coerceIn(0, c.width - 1)
+                val srcY = (y - shiftY).coerceIn(0, c.height - 1)
                 val dstIndex = y * c.width + x
                 val srcIndex = srcY * c.width + srcX
 
-                val a = original[dstIndex]
                 val g = gen[srcIndex]
+                if (Color.alpha(g) == 0) continue
+
+                val a = original[dstIndex]
                 fun mix(ca: Int, cg: Int) =
                     (ca * (1f - alpha) + cg * alpha).roundToInt().coerceIn(0, 255)
 
@@ -307,6 +365,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         out.setPixels(original, 0, c.width, c.left, c.top, c.width, c.height)
+        transformed.recycle()
         generated.recycle()
         return out
     }
@@ -345,33 +404,33 @@ class MainActivity : AppCompatActivity() {
                             session.run(mapOf(melName to mt, imgName to img)).use { r -> outputBitmap(r[0].value) }
                         }
                     }
-                    val composed = compositeMouth(base, face, crop, mouthOffsetXPercent, mouthOffsetYPercent)
+                    val composed = compositeMouth(base, face, crop, mouthOffsetXPercent, mouthOffsetYPercent, mouthAngleDeg, mouthScalePercent)
                     if (f == 0) {
                         val stamp = System.currentTimeMillis()
-                        savePng(crop.bitmap, "V09_01_input_crop_${stamp}.png")
-                        savePng(face, "V09_02_wav2lip_face_${stamp}.png")
-                        savePng(composed, "V09_03_composite_before_encoder_${stamp}.png")
+                        savePng(crop.bitmap, "V10_01_input_crop_${stamp}.png")
+                        savePng(face, "V10_02_wav2lip_face_${stamp}.png")
+                        savePng(composed, "V10_03_composite_before_encoder_${stamp}.png")
                     }
                     rendered.add(composed)
                     face.recycle()
                     if (f % 3 == 0) runOnUiThread {
                         progress.progress = 1 + f * 75 / frames
-                        status.text = "V0.9 lip-sync: ${f + 1}/$frames кадров"
+                        status.text = "V1.0 lip-sync: ${f + 1}/$frames кадров"
                     }
                 }
                 session.close()
-                val tmp = File(cacheDir, "v09_${System.currentTimeMillis()}.mp4")
+                val tmp = File(cacheDir, "v10_${System.currentTimeMillis()}.mp4")
                 val encoderInfo = encodeMp4(rendered, samples, tmp)
                 rendered.forEach { it.recycle() }
                 saveMovie(tmp)
                 val sec = (System.currentTimeMillis() - started) / 1000.0
                 runOnUiThread {
                     progress.progress = 100
-                    status.text = "✓ V0.9 ГОТОВА\n✓ PNG до кодирования сохранены в Pictures/DoramaAvatar\n✓ MP4: ${encoderInfo.width}x${encoderInfo.height}\n✓ AVC codec: ${encoderInfo.codec}\n✓ YUV format: ${encoderInfo.colorFormat}\n✓ $frames кадров / H.264 + AAC\n⏱ ${"%.1f".format(sec)} сек\n📁 Movies/DoramaAvatar\n\nX: ${mouthOffsetXPercent}% • Y: ${mouthOffsetYPercent}%\nПришли V09_03 + MP4, если нужна ещё подгонка."
-                    Toast.makeText(this, "V0.9: MP4 + PNG сохранены", Toast.LENGTH_LONG).show()
+                    status.text = "✓ V1.0 ГОТОВА\n✓ PNG до кодирования сохранены в Pictures/DoramaAvatar\n✓ MP4: ${encoderInfo.width}x${encoderInfo.height}\n✓ AVC codec: ${encoderInfo.codec}\n✓ YUV format: ${encoderInfo.colorFormat}\n✓ $frames кадров / H.264 + AAC\n⏱ ${"%.1f".format(sec)} сек\n📁 Movies/DoramaAvatar\n\nX: ${mouthOffsetXPercent}% • Y: ${mouthOffsetYPercent}% • Angle: ${mouthAngleDeg}° • Scale: ${mouthScalePercent}%\nПришли V10_03 + MP4, если нужна ещё подгонка."
+                    Toast.makeText(this, "V1.0: MP4 + PNG сохранены", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Throwable) {
-                runOnUiThread { status.text = "Ошибка V0.9: ${e.javaClass.simpleName}: ${e.message}" }
+                runOnUiThread { status.text = "Ошибка V1.0: ${e.javaClass.simpleName}: ${e.message}" }
             }
         }
     }
@@ -566,7 +625,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveMovie(f: File): Uri {
         val cv = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V09_${System.currentTimeMillis()}.mp4")
+            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V10_${System.currentTimeMillis()}.mp4")
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
             put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/DoramaAvatar")
         }

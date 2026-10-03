@@ -1,19 +1,74 @@
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent">
-<LinearLayout android:orientation="vertical" android:padding="20dp" android:layout_width="match_parent" android:layout_height="wrap_content">
-<TextView android:text="Dorama Avatar • V0.9 XY CALIBRATION" android:textSize="24sp" android:textStyle="bold" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-<TextView android:id="@+id/status" android:text="Точная подгонка рта по X и Y" android:paddingTop="12dp" android:paddingBottom="12dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-<ProgressBar android:id="@+id/progress" style="?android:attr/progressBarStyleHorizontal" android:max="100" android:progress="0" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-<ImageView android:id="@+id/preview" android:layout_width="match_parent" android:layout_height="360dp" android:scaleType="centerCrop" android:background="#222222"/>
-<Button android:id="@+id/imageButton" android:text="1. Выбрать PNG/JPG" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-<Button android:id="@+id/audioButton" android:text="2. Выбрать WAV" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-<Button android:id="@+id/modelButton" android:text="3. Проверить / скачать Wav2Lip GAN 96" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-<TextView android:id="@+id/mouthOffsetXLabel" android:text="X: 0% (по центру)" android:textSize="17sp" android:textStyle="bold" android:paddingTop="14dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-<SeekBar android:id="@+id/mouthOffsetXSeek" android:max="20" android:progress="10" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-<TextView android:text="X: лево = −10% • центр = 0% • право = +10%" android:textSize="13sp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-<TextView android:id="@+id/mouthOffsetYLabel" android:text="Y: -4% (вверх)" android:textSize="17sp" android:textStyle="bold" android:paddingTop="10dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-<SeekBar android:id="@+id/mouthOffsetYSeek" android:max="20" android:progress="6" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-<TextView android:text="Y: вверх = −10% • центр = 0% • вниз = +10%" android:textSize="13sp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-<Button android:id="@+id/generateButton" android:text="4. Создать MP4 с этими X/Y" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-<TextView android:text="V0.9: рабочую модель V0.7 и mel не меняем. Теперь рот можно двигать по двум осям без новой сборки. Старт: X=0%, Y=-4%." android:paddingTop="16dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+<LinearLayout
+    android:orientation="vertical"
+    android:padding="20dp"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+<TextView android:text="Dorama Avatar • V1.0 CALIBRATION"
+    android:textSize="24sp" android:textStyle="bold"
+    android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+
+<TextView android:id="@+id/status"
+    android:text="Подгонка рта: X / Y / угол / размер"
+    android:paddingTop="12dp" android:paddingBottom="12dp"
+    android:layout_width="match_parent" android:layout_height="wrap_content"/>
+
+<ProgressBar android:id="@+id/progress"
+    style="?android:attr/progressBarStyleHorizontal"
+    android:max="100" android:progress="0"
+    android:layout_width="match_parent" android:layout_height="wrap_content"/>
+
+<ImageView android:id="@+id/preview"
+    android:layout_width="match_parent" android:layout_height="330dp"
+    android:scaleType="centerCrop" android:background="#222222"/>
+
+<Button android:id="@+id/imageButton" android:text="1. Выбрать PNG/JPG"
+    android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<Button android:id="@+id/audioButton" android:text="2. Выбрать WAV"
+    android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<Button android:id="@+id/modelButton" android:text="3. Проверить / скачать Wav2Lip GAN 96"
+    android:layout_width="match_parent" android:layout_height="wrap_content"/>
+
+<TextView android:id="@+id/mouthOffsetXLabel" android:text="X: +10% (вправо)"
+    android:textSize="16sp" android:textStyle="bold" android:paddingTop="12dp"
+    android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<SeekBar android:id="@+id/mouthOffsetXSeek" android:max="40" android:progress="30"
+    android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<TextView android:text="X: −20% влево • 0% центр • +20% вправо"
+    android:textSize="12sp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+
+<TextView android:id="@+id/mouthOffsetYLabel" android:text="Y: -6% (вверх)"
+    android:textSize="16sp" android:textStyle="bold" android:paddingTop="8dp"
+    android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<SeekBar android:id="@+id/mouthOffsetYSeek" android:max="30" android:progress="9"
+    android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<TextView android:text="Y: −15% вверх • 0% центр • +15% вниз"
+    android:textSize="12sp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+
+<TextView android:id="@+id/mouthAngleLabel" android:text="Угол: 0°"
+    android:textSize="16sp" android:textStyle="bold" android:paddingTop="8dp"
+    android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<SeekBar android:id="@+id/mouthAngleSeek" android:max="24" android:progress="12"
+    android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<TextView android:text="Угол: −12° ... 0° ... +12°"
+    android:textSize="12sp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+
+<TextView android:id="@+id/mouthScaleLabel" android:text="Размер: 100%"
+    android:textSize="16sp" android:textStyle="bold" android:paddingTop="8dp"
+    android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<SeekBar android:id="@+id/mouthScaleSeek" android:max="30" android:progress="15"
+    android:layout_width="match_parent" android:layout_height="wrap_content"/>
+<TextView android:text="Размер: 85% ... 100% ... 115%"
+    android:textSize="12sp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+
+<Button android:id="@+id/generateButton" android:text="4. Создать MP4 с этими настройками"
+    android:layout_width="match_parent" android:layout_height="wrap_content"/>
+
+<TextView android:text="Стартовый пресет: X=+10%, Y=-6%, угол=0°, размер=100%. Настройки запоминаются."
+    android:paddingTop="14dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+
 </LinearLayout>
 </ScrollView>
