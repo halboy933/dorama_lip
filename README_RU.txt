@@ -1,27 +1,45 @@
-Dorama Avatar LipSync V1.2 — QUALITY
+Dorama Avatar LipSync V1.3 — EDTalk 256 QUALITY ENGINE
 
-V1.2 НЕ меняет рабочую модель, mel, BGR, moving-mask, MP4 и постоянную подпись.
+Главное:
+- добавлен EDTalk 256×256 из FaceFusion assets;
+- Wav2Lip GAN 96×96 оставлен как быстрый резерв;
+- основной режим по умолчанию: EDTalk 256.
 
-Что изменено:
-1) X/Y/Angle/Scale полностью сохранены;
-2) настройки продолжают храниться в SharedPreferences;
-3) для чистой установки новый ориентир:
-   X=+15%, Y=-6%, Angle=+3°, Scale=89%;
-4) feather-mask стала уже вокруг губ:
-   меньше затрагиваются щёки, нос и подбородок;
-5) добавлена лёгкая unsharp-резкость только к сгенерированной зоне;
-6) исходное изображение вне зоны губ вообще не шарпится;
-7) диагностика: V12_01 / V12_02 / V12_03;
-8) MP4: DoramaAvatar_V12_*.mp4.
+EDTalk 256:
+- модель ~258 МБ;
+- файл: edtalk_facefusion_256.onnx;
+- скачивается один раз и хранится в filesDir;
+- при обычных обновлениях приложения не удаляется;
+- вход target: RGB CHW 256×256;
+- source: 80×16 audio frame;
+- weight: 0.5;
+- output: RGB 256×256.
 
-Обновление:
-- applicationId прежний: com.dorama.avatar;
-- используется тот же stable signing key из V1.1;
-- V1.2 должна устанавливаться поверх V1.1;
-- модель в filesDir и настройки сохраняются, повторно скачивать модель не нужно.
+Audio path EDTalk повторяет FaceFusion:
+- 16 kHz mono;
+- peak normalize;
+- pre-emphasis 0.97;
+- STFT 800 / hop 200;
+- HTK mel 80, 55..7600 Hz;
+- log10 * 1.6 + 3.2, clip [-4, 4].
 
-Если качество после V1.2 достаточно для Shorts — это версия для первого выпуска рубрики.
-Если остаётся заметная мягкость именно внутри губ, следующий уровень — более высокое
-разрешение lip-sync-модели, а не дальнейшее усиление резкости 96x96.
+Сохранено:
+- X / Y / Angle / Scale;
+- SharedPreferences;
+- moving mask;
+- MP4 H.264 + AAC;
+- stable signing key;
+- обновление поверх V1.2;
+- старая 96px модель остаётся на телефоне как fallback.
 
-Wav2Lip weights используются только как технический некоммерческий тест.
+Стартовый ориентир текущего аватара:
+X=+15%, Y=-6%, Angle=+3°, Scale=89%.
+
+Диагностика:
+- V13_01_input_crop
+- V13_02_edtalk256_face (или wav2lip96_face)
+- V13_03_composite_before_encoder
+- DoramaAvatar_V13_*.mp4
+
+EDTalk metadata in FaceFusion: vendor tanshuai0219, Apache-2.0.
+Wav2Lip weights оставлены только как технический некоммерческий fallback.

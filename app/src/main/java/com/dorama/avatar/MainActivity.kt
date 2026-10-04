@@ -36,6 +36,7 @@ class MainActivity : AppCompatActivity() {
     private var mouthOffsetYPercent: Int = -6
     private var mouthAngleDeg: Int = 3
     private var mouthScalePercent: Int = 89
+    private var engineMode: String = "edtalk256"
 
     private val imagePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
         u?.let {
@@ -67,6 +68,22 @@ class MainActivity : AppCompatActivity() {
         mouthOffsetYPercent = prefs.getInt("mouth_y", -6)
         mouthAngleDeg = prefs.getInt("mouth_angle", 3)
         mouthScalePercent = prefs.getInt("mouth_scale", 89)
+
+        engineMode = prefs.getString("lip_engine", "edtalk256") ?: "edtalk256"
+        val engineGroup = findViewById<RadioGroup>(R.id.engineGroup)
+        findViewById<RadioButton>(
+            if (engineMode == "wav2lip96") R.id.engine96 else R.id.engine256
+        ).isChecked = true
+
+        engineGroup.setOnCheckedChangeListener { _, checkedId ->
+            engineMode = if (checkedId == R.id.engine96) "wav2lip96" else "edtalk256"
+            prefs.edit().putString("lip_engine", engineMode).apply()
+            status.text = if (engineMode == "edtalk256") {
+                "✓ Выбран EDTalk 256×256 — качество"
+            } else {
+                "✓ Выбран Wav2Lip GAN 96×96 — быстрый резерв"
+            }
+        }
 
         val mouthOffsetXSeek = findViewById<SeekBar>(R.id.mouthOffsetXSeek)
         val mouthOffsetYSeek = findViewById<SeekBar>(R.id.mouthOffsetYSeek)
@@ -153,33 +170,75 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.generateButton).setOnClickListener { generate() }
     }
 
-    private fun modelFile() = File(filesDir, "wav2lip_facefusion_gan96.onnx")
+    private fun wav2lipModelFile() = File(filesDir, "wav2lip_facefusion_gan96.onnx")
+    private fun edtalkModelFile() = File(filesDir, "edtalk_facefusion_256.onnx")
+
+    private fun activeModelFile(): File =
+        if (engineMode == "edtalk256") edtalkModelFile() else wav2lipModelFile()
+
+    private fun activeModelLabel(): String =
+        if (engineMode == "edtalk256") "EDTalk 256×256" else "Wav2Lip GAN 96×96"
+
+    private fun activeModelUrl(): String =
+        if (engineMode == "edtalk256") {
+            "https://github.com/facefusion/facefusion-assets/releases/download/models-3.3.0/edtalk_256.onnx"
+        } else {
+            "https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/wav2lip_gan_96.onnx"
+        }
+
+    private fun activeModelMinBytes(): Long =
+        if (engineMode == "edtalk256") 250_000_000L else 100_000_000L
 
     private fun downloadModel() {
-        if (modelFile().exists() && modelFile().length() > 100_000_000) {
-            status.text = "✓ Модель уже есть: ${modelFile().length() / 1024 / 1024} МБ"
+        val file = activeModelFile()
+        val label = activeModelLabel()
+
+        if (file.exists() && file.length() > activeModelMinBytes()) {
+            status.text = "✓ $label уже есть: ${file.length() / 1024 / 1024} МБ"
             return
         }
+
         thread {
             try {
-                runOnUiThread { status.text = "Скачиваю FaceFusion Wav2Lip GAN 96…"; progress.progress = 0 }
-                val c = URL("https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/wav2lip_gan_96.onnx").openConnection()
+                runOnUiThread {
+                    status.text = "Скачиваю $label…"
+                    progress.progress = 0
+                }
+
+                val c = URL(activeModelUrl()).openConnection()
                 val total = c.contentLengthLong
+
                 c.getInputStream().use { input ->
-                    modelFile().outputStream().use { out ->
+                    file.outputStream().use { output ->
                         val buf = ByteArray(262144)
                         var n: Int
                         var done = 0L
+
                         while (input.read(buf).also { n = it } > 0) {
-                            out.write(buf, 0, n)
+                            output.write(buf, 0, n)
                             done += n
-                            if (total > 0) runOnUiThread { progress.progress = (done * 100 / total).toInt() }
+                            if (total > 0) {
+                                runOnUiThread {
+                                    progress.progress = (done * 100 / total).toInt()
+                                }
+                            }
                         }
                     }
                 }
-                runOnUiThread { status.text = "✓ FaceFusion Wav2Lip GAN 96 готова" }
+
+                if (file.length() <= activeModelMinBytes()) {
+                    throw RuntimeException("Файл модели слишком маленький: ${file.length()} байт")
+                }
+
+                runOnUiThread {
+                    progress.progress = 100
+                    status.text = "✓ $label готова (${file.length() / 1024 / 1024} МБ)"
+                }
             } catch (e: Throwable) {
-                runOnUiThread { status.text = "Ошибка модели: ${e.message}" }
+                file.delete()
+                runOnUiThread {
+                    status.text = "Ошибка модели $label: ${e.message}"
+                }
             }
         }
     }
@@ -219,7 +278,7 @@ class MainActivity : AppCompatActivity() {
         val w = (right - left).coerceAtLeast(2)
         val h = (bottom - top).coerceAtLeast(2)
         val raw = Bitmap.createBitmap(b, left, top, w, h)
-        return FaceCrop(Bitmap.createScaledBitmap(raw, 96, 96, true), left, top, w, h)
+        return FaceCrop(raw, left, top, w, h)
     }
 
     /*
@@ -231,10 +290,12 @@ class MainActivity : AppCompatActivity() {
      * Оригинальный Wav2Lip получает изображения через OpenCV (BGR),
      * затем NHWC -> NCHW. Поэтому в Android явно подаём B,G,R.
      */
-    private fun imageTensor(b: Bitmap): FloatArray {
+    private fun imageTensor96(source: Bitmap): FloatArray {
+        val b = Bitmap.createScaledBitmap(source, 96, 96, true)
         val pix = IntArray(96 * 96)
         b.getPixels(pix, 0, 96, 0, 0, 96, 96)
         val out = FloatArray(6 * 96 * 96)
+
         for (y in 0 until 96) {
             for (x in 0 until 96) {
                 val p = pix[y * 96 + x]
@@ -250,6 +311,27 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+
+        b.recycle()
+        return out
+    }
+
+    private fun imageTensor256(source: Bitmap): FloatArray {
+        val b = Bitmap.createScaledBitmap(source, 256, 256, true)
+        val pix = IntArray(256 * 256)
+        b.getPixels(pix, 0, 256, 0, 0, 256, 256)
+        val out = FloatArray(3 * 256 * 256)
+
+        for (y in 0 until 256) {
+            for (x in 0 until 256) {
+                val p = pix[y * 256 + x]
+                out[0 * 256 * 256 + y * 256 + x] = Color.red(p) / 255f
+                out[1 * 256 * 256 + y * 256 + x] = Color.green(p) / 255f
+                out[2 * 256 * 256 + y * 256 + x] = Color.blue(p) / 255f
+            }
+        }
+
+        b.recycle()
         return out
     }
 
@@ -289,6 +371,41 @@ class MainActivity : AppCompatActivity() {
             throw RuntimeException("Неизвестный ONNX output layout: first=${first.size}")
         }
         out.setPixels(pix, 0, 96, 0, 0, 96, 96)
+        return out
+    }
+
+    private fun outputBitmap256(v: Any): Bitmap {
+        val batch = v as? Array<*> ?: throw RuntimeException("EDTalk output: не Array")
+        val first = batch.firstOrNull() as? Array<*>
+            ?: throw RuntimeException("EDTalk output: пустой batch")
+
+        val out = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
+        val pix = IntArray(256 * 256)
+
+        if (first.size == 3) {
+            for (y in 0 until 256) for (x in 0 until 256) {
+                fun ch(k: Int): Int {
+                    val row = (first[k] as Array<*>)[y] as FloatArray
+                    return (row[x].coerceIn(0f, 1f) * 255f).roundToInt()
+                }
+                pix[y * 256 + x] = Color.rgb(ch(0), ch(1), ch(2))
+            }
+        } else if (first.size == 256) {
+            for (y in 0 until 256) {
+                val row = first[y] as Array<*>
+                for (x in 0 until 256) {
+                    val rgb = row[x] as FloatArray
+                    val r = (rgb[0].coerceIn(0f, 1f) * 255f).roundToInt()
+                    val g = (rgb[1].coerceIn(0f, 1f) * 255f).roundToInt()
+                    val b = (rgb[2].coerceIn(0f, 1f) * 255f).roundToInt()
+                    pix[y * 256 + x] = Color.rgb(r, g, b)
+                }
+            }
+        } else {
+            throw RuntimeException("Неизвестный EDTalk output layout: first=${first.size}")
+        }
+
+        out.setPixels(pix, 0, 256, 0, 0, 256, 256)
         return out
     }
 
@@ -374,8 +491,13 @@ class MainActivity : AppCompatActivity() {
     ): Bitmap {
         val out = base.copy(Bitmap.Config.ARGB_8888, true)
         val generatedScaled = Bitmap.createScaledBitmap(generated96, c.width, c.height, true)
-        val generated = sharpenGenerated(generatedScaled)
-        generatedScaled.recycle()
+        val generated = if (generated96.width <= 96) {
+            val sharp = sharpenGenerated(generatedScaled)
+            generatedScaled.recycle()
+            sharp
+        } else {
+            generatedScaled
+        }
 
         val mouthCx = c.width * 0.50f
         val mouthCy = c.height * 0.72f
@@ -411,14 +533,14 @@ class MainActivity : AppCompatActivity() {
                 val fx = x.toFloat() / max(1, c.width - 1)
                 // V1.2: маска уже, чтобы не размягчать щёки/нос/подбородок.
                 // Центр тот же, поэтому выставленные X/Y/Angle/Scale не "съезжают".
-                val dx = (fx - 0.50f) / 0.30f
-                val dy = (fy - 0.72f) / 0.165f
+                val dx = (fx - 0.50f) / 0.32f
+                val dy = (fy - 0.72f) / 0.18f
                 val d2 = dx * dx + dy * dy
 
                 // В центре рот остаётся полностью сгенерированным,
                 // feather короче и заканчивается раньше.
                 val alpha = (
-                    (1f - smoothStep(0.46f, 1.00f, d2)) * 255f
+                    (1f - smoothStep(0.44f, 1.00f, d2)) * 255f
                 ).roundToInt().coerceIn(0, 255)
 
                 maskPixels[y * c.width + x] =
@@ -492,66 +614,228 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun generate() {
-        if (imageUri == null || audioUri == null) { status.text = "Сначала выбери картинку и WAV."; return }
-        if (!modelFile().exists()) { status.text = "Сначала скачай модель."; return }
+        if (imageUri == null || audioUri == null) {
+            status.text = "Сначала выбери картинку и WAV."
+            return
+        }
+
+        val model = activeModelFile()
+        if (!model.exists() || model.length() <= activeModelMinBytes()) {
+            status.text = "Сначала скачай выбранную модель: ${activeModelLabel()}."
+            return
+        }
+
         thread {
             try {
                 val started = System.currentTimeMillis()
-                runOnUiThread { status.text = "Ищу лицо…"; progress.progress = 1 }
-                val src = contentResolver.openInputStream(imageUri!!)!!.use { BitmapFactory.decodeStream(it) }
+                val engineAtStart = engineMode
+                val engineLabel = if (engineAtStart == "edtalk256") {
+                    "EDTalk 256×256"
+                } else {
+                    "Wav2Lip GAN 96×96"
+                }
+
+                runOnUiThread {
+                    status.text = "Ищу лицо… ($engineLabel)"
+                    progress.progress = 1
+                }
+
+                val src = contentResolver.openInputStream(imageUri!!)!!.use {
+                    BitmapFactory.decodeStream(it)
+                }
                 val base = scaleEven(src, 720)
                 val rect = detectFace(base)
                 val crop = cropInfo(base, rect)
-                val wav = contentResolver.openInputStream(audioUri!!)!!.use { WavUtils.readPcm16(it) }
+
+                val wav = contentResolver.openInputStream(audioUri!!)!!.use {
+                    WavUtils.readPcm16(it)
+                }
                 val samples = wav.samples.copyOf(min(wav.samples.size, 16000 * 5))
-                val mel = WavUtils.melSpectrogram(samples)
                 val frames = min(125, max(1, (samples.size / 16000f * 25).toInt()))
+
                 val env = OrtEnvironment.getEnvironment()
-                val session = env.createSession(modelFile().absolutePath, OrtSession.SessionOptions())
+                val session = env.createSession(model.absolutePath, OrtSession.SessionOptions())
                 val names = session.inputNames.toList()
-                val melName = names.firstOrNull { it.contains("mel", true) || it.contains("audio", true) || it.contains("source", true) } ?: names[0]
-                val imgName = names.firstOrNull { it.contains("video", true) || it.contains("frame", true) || it.contains("img", true) || it.contains("face", true) || it.contains("target", true) } ?: names.last()
-                val imageInput = imageTensor(crop.bitmap)
+
                 val rendered = ArrayList<Bitmap>(frames)
 
-                for (f in 0 until frames) {
-                    val mi = (f * 80.0 / 25.0).toInt().coerceAtMost(max(0, mel[0].size - 16))
-                    val mf = FloatArray(80 * 16)
-                    for (y in 0 until 80) for (x in 0 until 16) {
-                        mf[y * 16 + x] = mel[y][(mi + x).coerceAtMost(mel[y].lastIndex)]
-                    }
-                    val face = OnnxTensor.createTensor(env, FloatBuffer.wrap(mf), longArrayOf(1, 1, 80, 16)).use { mt ->
-                        OnnxTensor.createTensor(env, FloatBuffer.wrap(imageInput), longArrayOf(1, 6, 96, 96)).use { img ->
-                            session.run(mapOf(melName to mt, imgName to img)).use { r -> outputBitmap(r[0].value) }
+                if (engineAtStart == "edtalk256") {
+                    val spec = WavUtils.edtalkSpectrogram(samples)
+                    val targetInput = imageTensor256(crop.bitmap)
+
+                    val sourceName = names.firstOrNull {
+                        it.equals("source", true) || it.contains("audio", true)
+                    } ?: names[0]
+
+                    val targetName = names.firstOrNull {
+                        it.equals("target", true) || it.contains("image", true) ||
+                            it.contains("frame", true) || it.contains("face", true)
+                    } ?: names.getOrElse(1) { names.last() }
+
+                    val weightName = names.firstOrNull {
+                        it.equals("weight", true) || it.contains("weight", true)
+                    } ?: names.last()
+
+                    for (f in 0 until frames) {
+                        val sourceFrame = WavUtils.edtalkFrame(spec, f)
+
+                        val face = OnnxTensor.createTensor(
+                            env,
+                            FloatBuffer.wrap(sourceFrame),
+                            longArrayOf(1, 1, 80, 16)
+                        ).use { sourceTensor ->
+                            OnnxTensor.createTensor(
+                                env,
+                                FloatBuffer.wrap(targetInput),
+                                longArrayOf(1, 3, 256, 256)
+                            ).use { targetTensor ->
+                                OnnxTensor.createTensor(
+                                    env,
+                                    FloatBuffer.wrap(floatArrayOf(0.5f)),
+                                    longArrayOf(1)
+                                ).use { weightTensor ->
+                                    session.run(
+                                        mapOf(
+                                            sourceName to sourceTensor,
+                                            targetName to targetTensor,
+                                            weightName to weightTensor
+                                        )
+                                    ).use { result ->
+                                        outputBitmap256(result[0].value)
+                                    }
+                                }
+                            }
+                        }
+
+                        val composed = compositeMouth(
+                            base, face, crop,
+                            mouthOffsetXPercent,
+                            mouthOffsetYPercent,
+                            mouthAngleDeg,
+                            mouthScalePercent
+                        )
+
+                        if (f == 0) {
+                            val stamp = System.currentTimeMillis()
+                            savePng(crop.bitmap, "V13_01_input_crop_${stamp}.png")
+                            savePng(face, "V13_02_edtalk256_face_${stamp}.png")
+                            savePng(composed, "V13_03_composite_before_encoder_${stamp}.png")
+                        }
+
+                        rendered.add(composed)
+                        face.recycle()
+
+                        if (f % 2 == 0) {
+                            runOnUiThread {
+                                progress.progress = 1 + f * 75 / frames
+                                status.text = "EDTalk 256: ${f + 1}/$frames кадров"
+                            }
                         }
                     }
-                    val composed = compositeMouth(base, face, crop, mouthOffsetXPercent, mouthOffsetYPercent, mouthAngleDeg, mouthScalePercent)
-                    if (f == 0) {
-                        val stamp = System.currentTimeMillis()
-                        savePng(crop.bitmap, "V12_01_input_crop_${stamp}.png")
-                        savePng(face, "V12_02_wav2lip_face_${stamp}.png")
-                        savePng(composed, "V12_03_composite_before_encoder_${stamp}.png")
-                    }
-                    rendered.add(composed)
-                    face.recycle()
-                    if (f % 3 == 0) runOnUiThread {
-                        progress.progress = 1 + f * 75 / frames
-                        status.text = "V1.2 lip-sync: ${f + 1}/$frames кадров"
+                } else {
+                    val mel = WavUtils.melSpectrogram(samples)
+                    val imageInput = imageTensor96(crop.bitmap)
+
+                    val melName = names.firstOrNull {
+                        it.contains("mel", true) || it.contains("audio", true) ||
+                            it.contains("source", true)
+                    } ?: names[0]
+
+                    val imgName = names.firstOrNull {
+                        it.contains("video", true) || it.contains("frame", true) ||
+                            it.contains("img", true) || it.contains("face", true) ||
+                            it.contains("target", true)
+                    } ?: names.last()
+
+                    for (f in 0 until frames) {
+                        val mi = (f * 80.0 / 25.0).toInt()
+                            .coerceAtMost(max(0, mel[0].size - 16))
+                        val mf = FloatArray(80 * 16)
+
+                        for (y in 0 until 80) for (x in 0 until 16) {
+                            mf[y * 16 + x] =
+                                mel[y][(mi + x).coerceAtMost(mel[y].lastIndex)]
+                        }
+
+                        val face = OnnxTensor.createTensor(
+                            env,
+                            FloatBuffer.wrap(mf),
+                            longArrayOf(1, 1, 80, 16)
+                        ).use { mt ->
+                            OnnxTensor.createTensor(
+                                env,
+                                FloatBuffer.wrap(imageInput),
+                                longArrayOf(1, 6, 96, 96)
+                            ).use { img ->
+                                session.run(mapOf(melName to mt, imgName to img)).use { r ->
+                                    outputBitmap(r[0].value)
+                                }
+                            }
+                        }
+
+                        val composed = compositeMouth(
+                            base, face, crop,
+                            mouthOffsetXPercent,
+                            mouthOffsetYPercent,
+                            mouthAngleDeg,
+                            mouthScalePercent
+                        )
+
+                        if (f == 0) {
+                            val stamp = System.currentTimeMillis()
+                            savePng(crop.bitmap, "V13_01_input_crop_${stamp}.png")
+                            savePng(face, "V13_02_wav2lip96_face_${stamp}.png")
+                            savePng(composed, "V13_03_composite_before_encoder_${stamp}.png")
+                        }
+
+                        rendered.add(composed)
+                        face.recycle()
+
+                        if (f % 3 == 0) {
+                            runOnUiThread {
+                                progress.progress = 1 + f * 75 / frames
+                                status.text = "Wav2Lip 96: ${f + 1}/$frames кадров"
+                            }
+                        }
                     }
                 }
+
                 session.close()
-                val tmp = File(cacheDir, "v12_${System.currentTimeMillis()}.mp4")
+
+                val tmp = File(cacheDir, "v13_${System.currentTimeMillis()}.mp4")
                 val encoderInfo = encodeMp4(rendered, samples, tmp)
                 rendered.forEach { it.recycle() }
                 saveMovie(tmp)
+
                 val sec = (System.currentTimeMillis() - started) / 1000.0
+
                 runOnUiThread {
                     progress.progress = 100
-                    status.text = "✓ V1.2 ГОТОВА\n✓ PNG до кодирования сохранены в Pictures/DoramaAvatar\n✓ MP4: ${encoderInfo.width}x${encoderInfo.height}\n✓ AVC codec: ${encoderInfo.codec}\n✓ YUV format: ${encoderInfo.colorFormat}\n✓ $frames кадров / H.264 + AAC\n⏱ ${"%.1f".format(sec)} сек\n📁 Movies/DoramaAvatar\n\nX: ${mouthOffsetXPercent}% • Y: ${mouthOffsetYPercent}% • Angle: ${mouthAngleDeg}° • Scale: ${mouthScalePercent}%\nV1.2: moving-mask сохранена; зона губ уже + лёгкая резкость."
-                    Toast.makeText(this, "V1.2: MP4 + PNG сохранены", Toast.LENGTH_LONG).show()
+                    status.text =
+                        "✓ V1.3 ГОТОВА\n" +
+                        "✓ Движок: $engineLabel\n" +
+                        "✓ PNG: Pictures/DoramaAvatar\n" +
+                        "✓ MP4: ${encoderInfo.width}x${encoderInfo.height}\n" +
+                        "✓ $frames кадров / H.264 + AAC\n" +
+                        "⏱ ${"%.1f".format(sec)} сек\n" +
+                        "📁 Movies/DoramaAvatar\n\n" +
+                        "X: ${mouthOffsetXPercent}% • Y: ${mouthOffsetYPercent}% • " +
+                        "Angle: ${mouthAngleDeg}° • Scale: ${mouthScalePercent}%"
+
+                    Toast.makeText(
+                        this,
+                        "V1.3: $engineLabel — MP4 готов",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
+
+                crop.bitmap.recycle()
             } catch (e: Throwable) {
-                runOnUiThread { status.text = "Ошибка V1.2: ${e.javaClass.simpleName}: ${e.message}" }
+                runOnUiThread {
+                    status.text =
+                        "Ошибка V1.3 ${activeModelLabel()}: " +
+                        "${e.javaClass.simpleName}: ${e.message}"
+                }
             }
         }
     }
@@ -746,7 +1030,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveMovie(f: File): Uri {
         val cv = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V12_${System.currentTimeMillis()}.mp4")
+            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V13_${System.currentTimeMillis()}.mp4")
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
             put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/DoramaAvatar")
         }

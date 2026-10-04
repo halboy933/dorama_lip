@@ -191,6 +191,151 @@ object WavUtils {
         return if (mel >= minLogMel) minLogHz * exp(logStep * (mel - minLogMel)) else fSp * mel
     }
 
+
+    /*
+     * V1.3 EDTalk / FaceFusion audio path.
+     *
+     * FaceFusion для EDTalk:
+     *  - mono 16 kHz
+     *  - peak normalize
+     *  - pre-emphasis 0.97
+     *  - STFT 800 / hop 200
+     *  - HTK mel 80, 55..7600 Hz
+     *  - затем для каждого 80x16 окна:
+     *      max(1e-5, x) -> log10(x) * 1.6 + 3.2 -> clip(-4, 4)
+     */
+    fun edtalkSpectrogram(x: FloatArray, sr: Int = TARGET_SR): Array<FloatArray> {
+        require(sr == TARGET_SR) { "Ожидается 16 kHz" }
+        if (x.isEmpty()) return Array(N_MELS) { FloatArray(16) }
+
+        var peak = 0f
+        for (v in x) peak = max(peak, abs(v))
+        val norm = if (peak > 1e-8f) FloatArray(x.size) { x[it] / peak } else x.copyOf()
+
+        val emphasized = FloatArray(norm.size)
+        emphasized[0] = norm[0]
+        for (i in 1 until norm.size) emphasized[i] = norm[i] - PREEMPH * norm[i - 1]
+
+        val half = N_FFT / 2
+        var paddedSize = emphasized.size + N_FFT
+        val rem = (paddedSize - N_FFT) % HOP
+        if (rem != 0) paddedSize += HOP - rem
+        val y = FloatArray(paddedSize)
+        emphasized.copyInto(y, half)
+
+        val frames = 1 + (y.size - N_FFT) / HOP
+        val bins = N_FFT / 2 + 1
+
+        val window = FloatArray(WIN) { n ->
+            (0.5 - 0.5 * cos(2.0 * PI * n / WIN)).toFloat()
+        }
+        var windowSum = 0.0
+        for (v in window) windowSum += v
+        if (windowSum <= 0.0) windowSum = 1.0
+
+        val cosT = Array(bins) { k ->
+            FloatArray(N_FFT) { n -> cos(2.0 * PI * k * n / N_FFT).toFloat() }
+        }
+        val sinT = Array(bins) { k ->
+            FloatArray(N_FFT) { n -> sin(2.0 * PI * k * n / N_FFT).toFloat() }
+        }
+
+        val filters = buildEdtalkMelFilters(sr, N_FFT, N_MELS, FMIN, FMAX)
+        val result = Array(N_MELS) { FloatArray(frames) }
+
+        for (t in 0 until frames) {
+            val off = t * HOP
+            val mag = FloatArray(bins)
+
+            for (k in 0 until bins) {
+                var re = 0.0
+                var im = 0.0
+                for (n in 0 until N_FFT) {
+                    val v = y[off + n] * window[n]
+                    re += v * cosT[k][n]
+                    im -= v * sinT[k][n]
+                }
+                mag[k] = (sqrt(re * re + im * im) / windowSum).toFloat()
+            }
+
+            for (m in 0 until N_MELS) {
+                var amp = 0.0
+                for (k in 0 until bins) amp += filters[m][k] * mag[k]
+                result[m][t] = amp.toFloat()
+            }
+        }
+
+        return result
+    }
+
+    fun edtalkFrame(spec: Array<FloatArray>, frameIndex: Int, fps: Int = 25): FloatArray {
+        val start = floor(frameIndex * 80.0 / fps).toInt()
+        val out = FloatArray(N_MELS * 16)
+
+        for (m in 0 until N_MELS) {
+            for (x in 0 until 16) {
+                val raw = spec[m][(start + x).coerceAtMost(spec[m].lastIndex)]
+                val safe = max(1e-5f, raw)
+                val prepared = (log10(safe.toDouble()) * 1.6 + 3.2)
+                    .toFloat()
+                    .coerceIn(-4f, 4f)
+                out[m * 16 + x] = prepared
+            }
+        }
+
+        return out
+    }
+
+    private fun buildEdtalkMelFilters(
+        sr: Int,
+        nFft: Int,
+        nMels: Int,
+        fMin: Double,
+        fMax: Double
+    ): Array<FloatArray> {
+        val bins = nFft / 2 + 1
+
+        fun hzToMel(hz: Double): Double = 2595.0 * log10(1.0 + hz / 700.0)
+        fun melToHz(mel: Double): Double = 700.0 * (10.0.pow(mel / 2595.0) - 1.0)
+
+        val melMin = hzToMel(fMin)
+        val melMax = hzToMel(fMax)
+        val points = DoubleArray(nMels + 2) { i ->
+            melToHz(melMin + (melMax - melMin) * i / (nMels + 1))
+        }
+        val indices = IntArray(nMels + 2) { i ->
+            floor((nFft + 1) * points[i] / sr)
+                .toInt()
+                .coerceIn(0, bins - 1)
+        }
+
+        val filters = Array(nMels) { FloatArray(bins) }
+
+        for (m in 0 until nMels) {
+            val start = indices[m]
+            val end = indices[m + 1]
+            val len = end - start
+            if (len <= 0) continue
+
+            for (j in 0 until len) {
+                val value = if (len == 1) {
+                    1.0
+                } else if (len % 2 == 1) {
+                    val n = (len + 1) / 2.0
+                    if (j < (len + 1) / 2) (j + 1) / n
+                    else (len - j) / n
+                } else {
+                    val n = (len + 1) / 2.0
+                    if (j < len / 2) (j + 0.5) / n
+                    else (len - j - 0.5) / n
+                }
+                filters[m][start + j] = value.toFloat()
+            }
+        }
+
+        return filters
+    }
+
     private fun le16(b: ByteArray, p: Int) =
         (b[p].toInt() and 255) or ((b[p + 1].toInt() and 255) shl 8)
 
