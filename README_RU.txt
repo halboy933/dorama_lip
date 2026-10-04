@@ -1,45 +1,23 @@
-Dorama Avatar LipSync V1.3 — EDTalk 256 QUALITY ENGINE
+Dorama Avatar LipSync V1.3.1 — LOCAL MOUTH BLEND
 
-Главное:
-- добавлен EDTalk 256×256 из FaceFusion assets;
-- Wav2Lip GAN 96×96 оставлен как быстрый резерв;
-- основной режим по умолчанию: EDTalk 256.
+Основа: V1.3 EDTalk 256x256.
 
-EDTalk 256:
-- модель ~258 МБ;
-- файл: edtalk_facefusion_256.onnx;
-- скачивается один раз и хранится в filesDir;
-- при обычных обновлениях приложения не удаляется;
-- вход target: RGB CHW 256×256;
-- source: 80×16 audio frame;
-- weight: 0.5;
-- output: RGB 256×256.
+Изменения V1.3.1:
+- лицо больше не заменяется широкой областью EDTalk;
+- маска сужена к губам и ближайшей зоне подбородка;
+- глаза, нос, лоб и большая часть щек остаются из исходной фотографии;
+- для EDTalk 256 добавлено очень мягкое восстановление деталей (18% sharpen);
+- края маски остаются плавными;
+- X/Y/Angle/Scale сохранены;
+- Wav2Lip 96 сохранен как fallback;
+- stable signing не меняется;
+- EDTalk 256 повторно скачивать не нужно.
 
-Audio path EDTalk повторяет FaceFusion:
-- 16 kHz mono;
-- peak normalize;
-- pre-emphasis 0.97;
-- STFT 800 / hop 200;
-- HTK mel 80, 55..7600 Hz;
-- log10 * 1.6 + 3.2, clip [-4, 4].
-
-Сохранено:
-- X / Y / Angle / Scale;
-- SharedPreferences;
-- moving mask;
-- MP4 H.264 + AAC;
-- stable signing key;
-- обновление поверх V1.2;
-- старая 96px модель остаётся на телефоне как fallback.
-
-Стартовый ориентир текущего аватара:
+Стартовые параметры аватара:
 X=+15%, Y=-6%, Angle=+3°, Scale=89%.
 
 Диагностика:
-- V13_01_input_crop
-- V13_02_edtalk256_face (или wav2lip96_face)
-- V13_03_composite_before_encoder
-- DoramaAvatar_V13_*.mp4
-
-EDTalk metadata in FaceFusion: vendor tanshuai0219, Apache-2.0.
-Wav2Lip weights оставлены только как технический некоммерческий fallback.
+V131_01_input_crop
+V131_02_edtalk256_face
+V131_03_composite_before_encoder
+DoramaAvatar_V131_*.mp4
