@@ -11,6 +11,10 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.widget.*
+import android.view.View
+import android.view.MotionEvent
+import android.view.ViewGroup
+import android.content.Context
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.google.mlkit.vision.common.InputImage
@@ -37,11 +41,105 @@ class MainActivity : AppCompatActivity() {
     private var mouthAngleDeg: Int = 3
     private var mouthScalePercent: Int = 89
     private var engineMode: String = "edtalk256"
+    // Coordinates of manually selected lips, normalized to the full source image.
+    private var lipX = 0.50f
+    private var lipY = 0.72f
+    private var lipRx = 0.105f
+    private var lipRy = 0.045f
+    private var lipSelection: MouthSelectionView? = null
+
+    private fun saveLips() {
+        getSharedPreferences("dorama_avatar_lips", MODE_PRIVATE).edit()
+            .putFloat("cx", lipX).putFloat("cy", lipY)
+            .putFloat("rx", lipRx).putFloat("ry", lipRy).apply()
+    }
+
+    private inner class MouthSelectionView(context: Context) : View(context) {
+        private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.MAGENTA; style = Paint.Style.STROKE; strokeWidth = 4f
+        }
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x33FF00FF }
+        private val handle = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.YELLOW }
+        private var resizing = false
+        private var lastX = 0f
+        private var lastY = 0f
+
+        private fun imagePoint(nx: Float, ny: Float): PointF {
+            val d = preview.drawable ?: return PointF(width * nx, height * ny)
+            val pt = floatArrayOf(nx * d.intrinsicWidth, ny * d.intrinsicHeight)
+            preview.imageMatrix.mapPoints(pt)
+            return PointF(pt[0] + preview.left - left, pt[1] + preview.top - top)
+        }
+        private fun normalizedPoint(x: Float, y: Float): PointF {
+            val d = preview.drawable ?: return PointF(0.5f, 0.5f)
+            val inv = Matrix()
+            if (!preview.imageMatrix.invert(inv)) return PointF(0.5f, 0.5f)
+            val pt = floatArrayOf(x - preview.left + left, y - preview.top + top)
+            inv.mapPoints(pt)
+            return PointF((pt[0] / d.intrinsicWidth).coerceIn(0f, 1f),
+                (pt[1] / d.intrinsicHeight).coerceIn(0f, 1f))
+        }
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            if (preview.drawable == null) return
+            val center = imagePoint(lipX, lipY)
+            val a = imagePoint((lipX - lipRx).coerceAtLeast(0f), (lipY - lipRy).coerceAtLeast(0f))
+            val b = imagePoint((lipX + lipRx).coerceAtMost(1f), (lipY + lipRy).coerceAtMost(1f))
+            val oval = RectF(a.x, a.y, b.x, b.y)
+            canvas.drawOval(oval, fill); canvas.drawOval(oval, line)
+            canvas.drawCircle(center.x, center.y, 9f, handle)
+            canvas.drawCircle(b.x, b.y, 13f, handle)
+        }
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            if (preview.drawable == null) return false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    val edge = imagePoint((lipX + lipRx).coerceAtMost(1f), (lipY + lipRy).coerceAtMost(1f))
+                    resizing = hypot(event.x - edge.x, event.y - edge.y) < 75f
+                    val pt = normalizedPoint(event.x, event.y)
+                    if (!resizing) { lipX = pt.x; lipY = pt.y }
+                    lastX = event.x; lastY = event.y
+                    invalidate(); return true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val pt = normalizedPoint(event.x, event.y)
+                    if (resizing) {
+                        lipRx = abs(pt.x - lipX).coerceIn(0.015f, 0.35f)
+                        lipRy = abs(pt.y - lipY).coerceIn(0.010f, 0.22f)
+                    } else {
+                        val prev = normalizedPoint(lastX, lastY)
+                        lipX = (lipX + pt.x - prev.x).coerceIn(0f, 1f)
+                        lipY = (lipY + pt.y - prev.y).coerceIn(0f, 1f)
+                    }
+                    lastX = event.x; lastY = event.y
+                    invalidate(); return true
+                }
+                MotionEvent.ACTION_UP -> { saveLips(); invalidate(); performClick(); return true }
+                MotionEvent.ACTION_CANCEL -> { saveLips(); return true }
+            }
+            return true
+        }
+        override fun performClick(): Boolean { super.performClick(); return true }
+    }
+
+    private fun installLipSelector() {
+        val parent = preview.parent as ViewGroup
+        val index = parent.indexOfChild(preview)
+        val oldParams = preview.layoutParams
+        parent.removeView(preview)
+        val frame = FrameLayout(this)
+        parent.addView(frame, index, oldParams)
+        frame.addView(preview, FrameLayout.LayoutParams(-1, -1))
+        lipSelection = MouthSelectionView(this).also {
+            frame.addView(it, FrameLayout.LayoutParams(-1, -1))
+        }
+    }
 
     private val imagePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
         u?.let {
             imageUri = it
             preview.setImageURI(it)
+            lipSelection?.invalidate()
             status.text = "✓ Картинка: ${name(it)}"
         }
     }
@@ -57,6 +155,12 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         status = findViewById(R.id.status)
         preview = findViewById(R.id.preview)
+        val lipPrefs = getSharedPreferences("dorama_avatar_lips", MODE_PRIVATE)
+        lipX = lipPrefs.getFloat("cx", 0.50f)
+        lipY = lipPrefs.getFloat("cy", 0.72f)
+        lipRx = lipPrefs.getFloat("rx", 0.105f)
+        lipRy = lipPrefs.getFloat("ry", 0.045f)
+        installLipSelector()
         progress = findViewById(R.id.progress)
         mouthOffsetXLabel = findViewById(R.id.mouthOffsetXLabel)
         mouthOffsetYLabel = findViewById(R.id.mouthOffsetYLabel)
@@ -68,7 +172,7 @@ class MainActivity : AppCompatActivity() {
         mouthOffsetYPercent = prefs.getInt("mouth_y", -6)
         mouthAngleDeg = prefs.getInt("mouth_angle", 3)
         mouthScalePercent = prefs.getInt("mouth_scale", 89)
-        // V1.3.3: old X/Y values had different meaning (they moved the mask).
+        // V1.3.4: old X/Y values had different meaning (they moved the mask).
         if (!prefs.getBoolean("v133_calibration_reset", false)) {
             mouthOffsetXPercent = 0
             mouthOffsetYPercent = 0
@@ -511,8 +615,9 @@ class MainActivity : AppCompatActivity() {
             generatedScaled
         }
 
-        val mouthCx = c.width * 0.50f
-        val mouthCy = c.height * 0.72f
+        // Manual ellipse center mapped from the full image into the face crop.
+        val mouthCx = (base.width * lipX - c.left).coerceIn(0f, c.width.toFloat())
+        val mouthCy = (base.height * lipY - c.top).coerceIn(0f, c.height.toFloat())
         val shiftX = c.width * offsetXPercent / 100f
         val shiftY = c.height * offsetYPercent / 100f
         val scale = scalePercent / 100f
@@ -546,8 +651,8 @@ class MainActivity : AppCompatActivity() {
                 // V1.2: маска уже, чтобы не размягчать щёки/нос/подбородок.
                 // Центр тот же, поэтому выставленные X/Y/Angle/Scale не "съезжают".
                 // V1.3.2: lips-only mask. Everything outside this compact ellipse is original photo.
-                val dx = (fx - 0.50f) / 0.205f
-                val dy = (fy - 0.742f) / 0.090f
+                val dx = (x - mouthCx) / (base.width * lipRx).coerceAtLeast(1f)
+                val dy = (y - mouthCy) / (base.height * lipRy).coerceAtLeast(1f)
                 val d2 = dx * dx + dy * dy
 
                 // В центре рот остаётся полностью сгенерированным,
@@ -565,7 +670,7 @@ class MainActivity : AppCompatActivity() {
             maskPixels, 0, c.width, 0, 0, c.width, c.height
         )
 
-        // V1.3.3 fixed-mouth mask: X/Y/Angle/Scale move ONLY generated pixels.
+        // V1.3.4 fixed-mouth mask: X/Y/Angle/Scale move ONLY generated pixels.
         // The destination lips region stays fixed on the original photograph.
         val transformedMask = baseMask.copy(Bitmap.Config.ARGB_8888, false)
 
@@ -809,7 +914,7 @@ class MainActivity : AppCompatActivity() {
 
                 session.close()
 
-                val tmp = File(cacheDir, "v133_${System.currentTimeMillis()}.mp4")
+                val tmp = File(cacheDir, "v134_${System.currentTimeMillis()}.mp4")
                 val encoderInfo = encodeMp4(rendered, samples, tmp)
                 rendered.forEach { it.recycle() }
                 saveMovie(tmp)
@@ -819,7 +924,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     progress.progress = 100
                     status.text =
-                        "✓ V1.3.3 ГОТОВА\n" +
+                        "✓ V1.3.4 ГОТОВА\n" +
                         "✓ Движок: $engineLabel\n" +
                         "✓ PNG: Pictures/DoramaAvatar\n" +
                         "✓ MP4: ${encoderInfo.width}x${encoderInfo.height}\n" +
@@ -831,7 +936,7 @@ class MainActivity : AppCompatActivity() {
 
                     Toast.makeText(
                         this,
-                        "V1.3.3: $engineLabel — MP4 готов",
+                        "V1.3.4: $engineLabel — MP4 готов",
                         Toast.LENGTH_LONG
                     ).show()
                 }
@@ -840,7 +945,7 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Throwable) {
                 runOnUiThread {
                     status.text =
-                        "Ошибка V1.3.3 ${activeModelLabel()}: " +
+                        "Ошибка V1.3.4 ${activeModelLabel()}: " +
                         "${e.javaClass.simpleName}: ${e.message}"
                 }
             }
@@ -1037,7 +1142,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveMovie(f: File): Uri {
         val cv = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V133_${System.currentTimeMillis()}.mp4")
+            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V134_${System.currentTimeMillis()}.mp4")
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
             put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/DoramaAvatar")
         }
