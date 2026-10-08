@@ -496,18 +496,9 @@ class MainActivity : AppCompatActivity() {
             generatedScaled.recycle()
             sharp
         } else {
-            // V1.3.1: EDTalk 256 gets only a light detail recovery.
-            // Do not sharpen the original face; this bitmap is used only under mouth mask.
-            val sharp = sharpenGenerated(generatedScaled)
-            val detail = Bitmap.createBitmap(generatedScaled.width, generatedScaled.height, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(detail)
-            val pBase = Paint(Paint.ANTI_ALIAS_FLAG).apply { alpha = 209 } // 82%
-            val pSharp = Paint(Paint.ANTI_ALIAS_FLAG).apply { alpha = 46 } // 18%
-            canvas.drawBitmap(generatedScaled, 0f, 0f, pBase)
-            canvas.drawBitmap(sharp, 0f, 0f, pSharp)
-            sharp.recycle()
-            generatedScaled.recycle()
-            detail
+            // V1.3.2: keep EDTalk 256 native. No full-face blur/sharpen/reblend pass.
+            // compositeMouth keeps the base photograph and admits these pixels only under lips mask.
+            generatedScaled
         }
 
         val mouthCx = c.width * 0.50f
@@ -544,15 +535,15 @@ class MainActivity : AppCompatActivity() {
                 val fx = x.toFloat() / max(1, c.width - 1)
                 // V1.2: маска уже, чтобы не размягчать щёки/нос/подбородок.
                 // Центр тот же, поэтому выставленные X/Y/Angle/Scale не "съезжают".
-                // V1.3.1: narrow mouth-local mask. Preserve original face detail.
-                val dx = (fx - 0.50f) / 0.255f
-                val dy = (fy - 0.735f) / 0.125f
+                // V1.3.2: lips-only mask. Everything outside this compact ellipse is original photo.
+                val dx = (fx - 0.50f) / 0.205f
+                val dy = (fy - 0.742f) / 0.090f
                 val d2 = dx * dx + dy * dy
 
                 // В центре рот остаётся полностью сгенерированным,
                 // feather короче и заканчивается раньше.
                 val alpha = (
-                    (1f - smoothStep(0.36f, 1.00f, d2)) * 255f
+                    (1f - smoothStep(0.22f, 1.00f, d2)) * 255f
                 ).roundToInt().coerceIn(0, 255)
 
                 maskPixels[y * c.width + x] =
@@ -729,9 +720,9 @@ class MainActivity : AppCompatActivity() {
 
                         if (f == 0) {
                             val stamp = System.currentTimeMillis()
-                            savePng(crop.bitmap, "V131_01_input_crop_${stamp}.png")
-                            savePng(face, "V131_02_edtalk256_face_${stamp}.png")
-                            savePng(composed, "V131_03_composite_before_encoder_${stamp}.png")
+                            savePng(crop.bitmap, "V132_01_input_crop_${stamp}.png")
+                            savePng(face, "V132_02_edtalk256_face_${stamp}.png")
+                            savePng(composed, "V132_03_composite_before_encoder_${stamp}.png")
                         }
 
                         rendered.add(composed)
@@ -795,9 +786,9 @@ class MainActivity : AppCompatActivity() {
 
                         if (f == 0) {
                             val stamp = System.currentTimeMillis()
-                            savePng(crop.bitmap, "V131_01_input_crop_${stamp}.png")
-                            savePng(face, "V131_02_wav2lip96_face_${stamp}.png")
-                            savePng(composed, "V131_03_composite_before_encoder_${stamp}.png")
+                            savePng(crop.bitmap, "V132_01_input_crop_${stamp}.png")
+                            savePng(face, "V132_02_wav2lip96_face_${stamp}.png")
+                            savePng(composed, "V132_03_composite_before_encoder_${stamp}.png")
                         }
 
                         rendered.add(composed)
@@ -814,7 +805,7 @@ class MainActivity : AppCompatActivity() {
 
                 session.close()
 
-                val tmp = File(cacheDir, "v131_${System.currentTimeMillis()}.mp4")
+                val tmp = File(cacheDir, "v132_${System.currentTimeMillis()}.mp4")
                 val encoderInfo = encodeMp4(rendered, samples, tmp)
                 rendered.forEach { it.recycle() }
                 saveMovie(tmp)
@@ -824,7 +815,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     progress.progress = 100
                     status.text =
-                        "✓ V1.3.1 ГОТОВА\n" +
+                        "✓ V1.3.2 ГОТОВА\n" +
                         "✓ Движок: $engineLabel\n" +
                         "✓ PNG: Pictures/DoramaAvatar\n" +
                         "✓ MP4: ${encoderInfo.width}x${encoderInfo.height}\n" +
@@ -836,7 +827,7 @@ class MainActivity : AppCompatActivity() {
 
                     Toast.makeText(
                         this,
-                        "V1.3.1: $engineLabel — MP4 готов",
+                        "V1.3.2: $engineLabel — MP4 готов",
                         Toast.LENGTH_LONG
                     ).show()
                 }
@@ -845,7 +836,7 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Throwable) {
                 runOnUiThread {
                     status.text =
-                        "Ошибка V1.3.1 ${activeModelLabel()}: " +
+                        "Ошибка V1.3.2 ${activeModelLabel()}: " +
                         "${e.javaClass.simpleName}: ${e.message}"
                 }
             }
@@ -1042,7 +1033,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveMovie(f: File): Uri {
         val cv = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V131_${System.currentTimeMillis()}.mp4")
+            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V132_${System.currentTimeMillis()}.mp4")
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
             put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/DoramaAvatar")
         }

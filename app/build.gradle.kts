@@ -15,8 +15,8 @@ android {
         applicationId = "com.dorama.avatar"
         minSdk = 26
         targetSdk = 35
-        versionCode = 14
-        versionName = "1.3.1"
+        versionCode = 15
+        versionName = "1.3.2"
     }
 
     val stableSigning = if (

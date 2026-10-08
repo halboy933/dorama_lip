@@ -9,7 +9,7 @@
     android:layout_height="wrap_content">
 
 <TextView
-    android:text="Dorama Avatar • V1.3.1 EDTalk 256"
+    android:text="Dorama Avatar • V1.3.2 EDTalk 256"
     android:textSize="24sp"
     android:textStyle="bold"
     android:layout_width="wrap_content"
@@ -112,7 +112,7 @@
     android:layout_height="wrap_content"/>
 
 <TextView
-    android:text="V1.3.1: EDTalk 256 + LOCAL MOUTH BLEND. Исходная резкость лица сохраняется. Wav2Lip 96 оставлен как резерв. X/Y/Angle/Scale и moving-mask сохранены."
+    android:text="V1.3.2: ORIGINAL FACE + LIPS ONLY. EDTalk меняет только компактную зону губ. Wav2Lip 96 оставлен как резерв. X/Y/Angle/Scale и moving-mask сохранены."
     android:paddingTop="14dp"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"/>
