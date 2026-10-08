@@ -63,6 +63,13 @@ class MainActivity : AppCompatActivity() {
         }
         private val overlayFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x44FF00FF }
         private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.YELLOW }
+        // V1.3.6: alignment preview (original pixels, NOT AI generated lips).
+        var showAlignmentPreview = false
+        var previewShiftX = 0
+        var previewShiftY = 0
+        var previewAngle = 0
+        var previewScale = 100
+        private val previewPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         private val matrix = Matrix()
         private val inverse = Matrix()
         private var fitScale = 1f
@@ -107,6 +114,31 @@ class MainActivity : AppCompatActivity() {
             canvas.drawColor(Color.BLACK)
             updateMatrix()
             canvas.drawBitmap(photo,matrix,imagePaint)
+            if (showAlignmentPreview) {
+                // Approximate alignment: use original photo pixels to preview position,
+                // rotation and scale before costly ONNX generation.
+                val centerX=lipX*photo.width; val centerY=lipY*photo.height
+                val rX=lipRx*photo.width; val rY=lipRy*photo.height
+                val sc=fitScale*zoom
+                val center=toScreen(centerX,centerY)
+                val clip=Path().apply {
+                    addOval(RectF(-rX*sc,-rY*sc,rX*sc,rY*sc),Path.Direction.CW)
+                }
+                val generatedTransform=Matrix().apply {
+                    postScale(previewScale/100f,previewScale/100f,centerX,centerY)
+                    postRotate(previewAngle.toFloat(),centerX,centerY)
+                    // The actual renderer uses face-crop dimensions; estimate here.
+                    postTranslate(previewShiftX*rX*3f/100f,previewShiftY*rY*5f/100f)
+                }
+                val combined=Matrix(matrix).apply { preConcat(generatedTransform) }
+                canvas.save()
+                canvas.translate(center.x,center.y)
+                canvas.rotate(lipRotation)
+                canvas.clipPath(clip)
+                canvas.translate(-center.x,-center.y)
+                canvas.drawBitmap(photo,combined,previewPaint)
+                canvas.restore()
+            }
             val cx=lipX*photo.width; val cy=lipY*photo.height
             val rx=lipRx*photo.width; val ry=lipRy*photo.height
             val center=toScreen(cx,cy)
@@ -215,17 +247,36 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this,"Не удалось открыть фотографию",Toast.LENGTH_LONG).show();return
         }
         val old=floatArrayOf(lipX,lipY,lipRx,lipRy,lipRotation)
+        val calibrationPrefs=getSharedPreferences("dorama_avatar_calibration",MODE_PRIVATE)
+        val oldCalibration=intArrayOf(mouthOffsetXPercent,mouthOffsetYPercent,mouthAngleDeg,mouthScalePercent)
+        fun restoreCalibration() {
+            mouthOffsetXPercent=oldCalibration[0];mouthOffsetYPercent=oldCalibration[1]
+            mouthAngleDeg=oldCalibration[2];mouthScalePercent=oldCalibration[3]
+        }
+        fun refreshMainCalibration() {
+            findViewById<SeekBar>(R.id.mouthOffsetXSeek)?.progress=(mouthOffsetXPercent+20).coerceIn(0,40)
+            findViewById<SeekBar>(R.id.mouthOffsetYSeek)?.progress=(mouthOffsetYPercent+15).coerceIn(0,30)
+            findViewById<SeekBar>(R.id.mouthAngleSeek)?.progress=(mouthAngleDeg+12).coerceIn(0,24)
+            findViewById<SeekBar>(R.id.mouthScaleSeek)?.progress=(mouthScalePercent-85).coerceIn(0,30)
+        }
         val dialog=android.app.Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen)
-        val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;setBackgroundColor(Color.BLACK) }
+        // V1.3.5.1: fullscreen image, controls anchored independently at bottom.
+        val root=FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         val editor=FullscreenLipsEditor(this,photo)
-        root.addView(editor,LinearLayout.LayoutParams(-1,0,1f))
+        root.addView(editor,FrameLayout.LayoutParams(-1,-1))
+        val controls=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL
+            setBackgroundColor(Color.rgb(24,24,24))
+            val d=resources.displayMetrics.density
+            setPadding((8*d).toInt(),(6*d).toInt(),(8*d).toInt(),(6*d).toInt())
+        }
         val info=TextView(this).apply {
             text="Перемещай фото вне эллипса • 2 пальца — масштаб • жёлтые точки — ширина и высота"
             setTextColor(Color.WHITE);textSize=12f;setPadding(12,8,12,8)
         }
-        root.addView(info)
+        controls.addView(info)
         val rotationText=TextView(this).apply {setTextColor(Color.WHITE);text="Наклон эллипса: ${lipRotation.toInt()}°";setPadding(12,4,12,4)}
-        root.addView(rotationText)
+        controls.addView(rotationText)
         val angle=SeekBar(this).apply {
             max=180;progress=(lipRotation+90).toInt().coerceIn(0,180)
             setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
@@ -236,7 +287,7 @@ class MainActivity : AppCompatActivity() {
                 override fun onStopTrackingTouch(bar:SeekBar?) {}
             })
         }
-        root.addView(angle)
+        controls.addView(angle)
         val buttons=LinearLayout(this).apply {orientation=LinearLayout.HORIZONTAL}
         val reset=Button(this).apply {text="Сброс";setOnClickListener {
             lipX=.5f;lipY=.72f;lipRx=.105f;lipRy=.045f;lipRotation=0f
@@ -244,14 +295,115 @@ class MainActivity : AppCompatActivity() {
         }}
         val cancel=Button(this).apply {text="Отмена";setOnClickListener {
             lipX=old[0];lipY=old[1];lipRx=old[2];lipRy=old[3];lipRotation=old[4]
+            restoreCalibration();dialog.dismiss()
+        }}
+        val save=Button(this).apply {text="Сохранить";setOnClickListener {
+            saveLips()
+            calibrationPrefs.edit().putInt("mouth_x",mouthOffsetXPercent)
+                .putInt("mouth_y",mouthOffsetYPercent)
+                .putInt("mouth_angle",mouthAngleDeg)
+                .putInt("mouth_scale",mouthScalePercent).apply()
+            refreshMainCalibration()
             dialog.dismiss()
         }}
-        val save=Button(this).apply {text="Сохранить";setOnClickListener {saveLips();dialog.dismiss()}}
         for(button in arrayOf(reset,cancel,save)) buttons.addView(button,LinearLayout.LayoutParams(0,-2,1f))
-        root.addView(buttons)
+        // V1.3.6: adjustment controls inside the editor, live approximate preview.
+        val previewToggle=CheckBox(this).apply {
+            text="Предпросмотр совмещения (без ИИ)"
+            setTextColor(Color.WHITE)
+            isChecked=true
+            editor.showAlignmentPreview=true
+            setOnCheckedChangeListener { _, checked ->
+                editor.showAlignmentPreview=checked
+                editor.invalidate()
+            }
+        }
+        controls.addView(previewToggle)
+        fun adjustment(label:String,min:Int,max:Int,initial:Int,unit:String,onUpdate:(Int)->Unit) {
+            val line=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
+            val title=TextView(this).apply {
+                setTextColor(Color.WHITE)
+                textSize=12f
+                text="$label: $initial$unit"
+                gravity=android.view.Gravity.CENTER_VERTICAL
+            }
+            line.addView(title,LinearLayout.LayoutParams((105*resources.displayMetrics.density).toInt(),-2))
+            val bar=SeekBar(this).apply {
+                this.max=max-min
+                progress=(initial-min).coerceIn(0,max-min)
+                setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(b:SeekBar?,v:Int,fromUser:Boolean) {
+                        val value=v+min
+                        title.text="$label: $value$unit"
+                        onUpdate(value)
+                        editor.invalidate()
+                    }
+                    override fun onStartTrackingTouch(b:SeekBar?) {}
+                    override fun onStopTrackingTouch(b:SeekBar?) {}
+                })
+            }
+            line.addView(bar,LinearLayout.LayoutParams(0,-2,1f))
+            controls.addView(line)
+        }
+        editor.previewShiftX=mouthOffsetXPercent
+        editor.previewShiftY=mouthOffsetYPercent
+        editor.previewAngle=mouthAngleDeg
+        editor.previewScale=mouthScalePercent
+        adjustment("Сдвиг X",-20,20,mouthOffsetXPercent,"%") {
+            mouthOffsetXPercent=it;editor.previewShiftX=it
+        }
+        adjustment("Сдвиг Y",-15,15,mouthOffsetYPercent,"%") {
+            mouthOffsetYPercent=it;editor.previewShiftY=it
+        }
+        adjustment("Поворот",-12,12,mouthAngleDeg,"°") {
+            mouthAngleDeg=it;editor.previewAngle=it
+        }
+        adjustment("Масштаб",85,115,mouthScalePercent,"%") {
+            mouthScalePercent=it;editor.previewScale=it
+        }
+        val hint=TextView(this).apply {
+            text="Предпросмотр показывает сдвиг исходного фото, не результат нейросети"
+            setTextColor(Color.LTGRAY);textSize=10f
+        }
+        controls.addView(hint)
+        // Keep save/cancel buttons last and visible.
+        controls.removeView(buttons)
+        // Keep controls above gesture/navigation bar on Android 10+.
+        // Insets applied to bottom panel after it is created.
+        /* controls.setOnApplyWindowInsetsListener { view, insets ->
+            val d=resources.displayMetrics.density
+            val bottom=if (Build.VERSION.SDK_INT >= 30) {
+                insets.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom
+            } else {
+                @Suppress("DEPRECATION")
+                insets.systemWindowInsetBottom
+            }
+            view.setPadding((8*d).toInt(),(6*d).toInt(),(8*d).toInt(),(6*d).toInt()+bottom)
+            insets
+        } */
+        val scroller=ScrollView(this).apply {
+            isFillViewport=false
+            addView(controls)
+        }
+        val maxPanel=(resources.displayMetrics.heightPixels*0.55f).toInt()
+        val bottomPanel=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL
+            setBackgroundColor(Color.rgb(24,24,24))
+        }
+        bottomPanel.addView(scroller,LinearLayout.LayoutParams(-1,maxPanel-(58*resources.displayMetrics.density).toInt()))
+        bottomPanel.addView(buttons,LinearLayout.LayoutParams(-1,-2))
+        bottomPanel.setOnApplyWindowInsetsListener { view, insets ->
+            val bottom=if(Build.VERSION.SDK_INT>=30)
+                insets.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom
+            else insets.systemWindowInsetBottom
+            view.setPadding(0,0,0,bottom)
+            insets
+        }
+        root.addView(bottomPanel,FrameLayout.LayoutParams(-1,-2,android.view.Gravity.BOTTOM))
         dialog.setContentView(root)
         dialog.setOnCancelListener {
             lipX=old[0];lipY=old[1];lipRx=old[2];lipRy=old[3];lipRotation=old[4]
+            restoreCalibration()
         }
         dialog.setOnDismissListener { photo.recycle() }
         dialog.show()
@@ -1067,7 +1219,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     progress.progress = 100
                     status.text =
-                        "✓ V1.3.5 ГОТОВА\n" +
+                        "✓ V1.3.5.1 ГОТОВА\n" +
                         "✓ Движок: $engineLabel\n" +
                         "✓ PNG: Pictures/DoramaAvatar\n" +
                         "✓ MP4: ${encoderInfo.width}x${encoderInfo.height}\n" +
@@ -1079,7 +1231,7 @@ class MainActivity : AppCompatActivity() {
 
                     Toast.makeText(
                         this,
-                        "V1.3.5: $engineLabel — MP4 готов",
+                        "V1.3.5.1: $engineLabel — MP4 готов",
                         Toast.LENGTH_LONG
                     ).show()
                 }
