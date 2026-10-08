@@ -68,6 +68,16 @@ class MainActivity : AppCompatActivity() {
         mouthOffsetYPercent = prefs.getInt("mouth_y", -6)
         mouthAngleDeg = prefs.getInt("mouth_angle", 3)
         mouthScalePercent = prefs.getInt("mouth_scale", 89)
+        // V1.3.3: old X/Y values had different meaning (they moved the mask).
+        if (!prefs.getBoolean("v133_calibration_reset", false)) {
+            mouthOffsetXPercent = 0
+            mouthOffsetYPercent = 0
+            mouthAngleDeg = 0
+            mouthScalePercent = 100
+            prefs.edit().putInt("mouth_x", 0).putInt("mouth_y", 0)
+                .putInt("mouth_angle", 0).putInt("mouth_scale", 100)
+                .putBoolean("v133_calibration_reset", true).apply()
+        }
 
         engineMode = prefs.getString("lip_engine", "edtalk256") ?: "edtalk256"
         val engineGroup = findViewById<RadioGroup>(R.id.engineGroup)
@@ -555,15 +565,9 @@ class MainActivity : AppCompatActivity() {
             maskPixels, 0, c.width, 0, 0, c.width, c.height
         )
 
-        // Та же Matrix двигает сам "кружок".
-        val transformedMask = Bitmap.createBitmap(
-            c.width, c.height, Bitmap.Config.ARGB_8888
-        )
-        Canvas(transformedMask).drawBitmap(
-            baseMask,
-            transform,
-            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-        )
+        // V1.3.3 fixed-mouth mask: X/Y/Angle/Scale move ONLY generated pixels.
+        // The destination lips region stays fixed on the original photograph.
+        val transformedMask = baseMask.copy(Bitmap.Config.ARGB_8888, false)
 
         val original = IntArray(c.width * c.height)
         val facePixels = IntArray(c.width * c.height)
@@ -805,7 +809,7 @@ class MainActivity : AppCompatActivity() {
 
                 session.close()
 
-                val tmp = File(cacheDir, "v132_${System.currentTimeMillis()}.mp4")
+                val tmp = File(cacheDir, "v133_${System.currentTimeMillis()}.mp4")
                 val encoderInfo = encodeMp4(rendered, samples, tmp)
                 rendered.forEach { it.recycle() }
                 saveMovie(tmp)
@@ -815,7 +819,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     progress.progress = 100
                     status.text =
-                        "✓ V1.3.2 ГОТОВА\n" +
+                        "✓ V1.3.3 ГОТОВА\n" +
                         "✓ Движок: $engineLabel\n" +
                         "✓ PNG: Pictures/DoramaAvatar\n" +
                         "✓ MP4: ${encoderInfo.width}x${encoderInfo.height}\n" +
@@ -827,7 +831,7 @@ class MainActivity : AppCompatActivity() {
 
                     Toast.makeText(
                         this,
-                        "V1.3.2: $engineLabel — MP4 готов",
+                        "V1.3.3: $engineLabel — MP4 готов",
                         Toast.LENGTH_LONG
                     ).show()
                 }
@@ -836,7 +840,7 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Throwable) {
                 runOnUiThread {
                     status.text =
-                        "Ошибка V1.3.2 ${activeModelLabel()}: " +
+                        "Ошибка V1.3.3 ${activeModelLabel()}: " +
                         "${e.javaClass.simpleName}: ${e.message}"
                 }
             }
@@ -1033,7 +1037,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveMovie(f: File): Uri {
         val cv = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V132_${System.currentTimeMillis()}.mp4")
+            put(MediaStore.Video.Media.DISPLAY_NAME, "DoramaAvatar_V133_${System.currentTimeMillis()}.mp4")
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
             put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/DoramaAvatar")
         }
