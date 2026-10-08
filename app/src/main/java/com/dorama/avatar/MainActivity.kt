@@ -900,9 +900,12 @@ class MainActivity : AppCompatActivity() {
             generatedScaled.recycle()
             sharp
         } else {
-            // V1.3.2: keep EDTalk 256 native. No full-face blur/sharpen/reblend pass.
-            // compositeMouth keeps the base photograph and admits these pixels only under lips mask.
-            generatedScaled
+            // V1.3.7: localized detail enhancement. The generated face is only
+            // inserted through the lip mask, so original skin stays untouched.
+            // Keep sharpening mild: EDTalk cannot reconstruct missing detail.
+            val enhanced = sharpenGenerated(generatedScaled, 0.24f)
+            generatedScaled.recycle()
+            enhanced
         }
 
         // Manual ellipse center mapped from the full image into the face crop.
@@ -934,6 +937,8 @@ class MainActivity : AppCompatActivity() {
         )
         val maskPixels = IntArray(c.width * c.height)
 
+        // V1.3.7: localized detail enhancement and a narrower feather band.
+        // No movement of the selected ellipse or alignment settings.
         val maskRadians = Math.toRadians(lipRotation.toDouble())
         val maskCos = cos(maskRadians).toFloat()
         val maskSin = sin(maskRadians).toFloat()
@@ -953,7 +958,7 @@ class MainActivity : AppCompatActivity() {
                 // В центре рот остаётся полностью сгенерированным,
                 // feather короче и заканчивается раньше.
                 val alpha = (
-                    (1f - smoothStep(0.22f, 1.00f, d2)) * 255f
+                    (1f - smoothStep(0.62f, 1.00f, d2)) * 255f
                 ).roundToInt().coerceIn(0, 255)
 
                 maskPixels[y * c.width + x] =
