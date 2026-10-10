@@ -1191,7 +1191,11 @@ class MainActivity : AppCompatActivity() {
                     val aligned = alignEdtalkFace(base)
                     savePng(aligned.bitmap, "V139_01_aligned_input.png")
                     savePng(aligned.bitmap, "V140_01_aligned_input_256.png")
+                    // V142_EDTALK_VALIDATION
                     val targetInput = imageTensor256(aligned.bitmap)
+                    check(targetInput.size == 3 * 256 * 256 && targetInput.all { it.isFinite() && it >= 0f && it <= 1f }) {
+                        "EDTalk: invalid RGB tensor"
+                    }
 
                     val sourceName = names.firstOrNull {
                         it.equals("source", true) || it.contains("audio", true)
@@ -1208,6 +1212,13 @@ class MainActivity : AppCompatActivity() {
 
                     for (f in 0 until frames) {
                         val sourceFrame = WavUtils.edtalkFrame(spec, f)
+                        check(sourceFrame.size == 80 * 16 && sourceFrame.all { it.isFinite() && it >= -4f && it <= 4f }) {
+                            "EDTalk: invalid mel tensor"
+                        }
+                        if (f == 0) android.util.Log.i(
+                            "DoramaAvatar",
+                            "V142 EDTalk mel min=${sourceFrame.minOrNull()} max=${sourceFrame.maxOrNull()} mean=${sourceFrame.average()}"
+                        )
 
                         val face = OnnxTensor.createTensor(
                             env,
@@ -1237,6 +1248,21 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
 
+                        if (f == 0) {
+                            val inputPixels = IntArray(256 * 256)
+                            val outputPixels = IntArray(256 * 256)
+                            aligned.bitmap.getPixels(inputPixels, 0, 256, 0, 0, 256, 256)
+                            face.getPixels(outputPixels, 0, 256, 0, 0, 256, 256)
+                            var sum = 0.0
+                            for (i in inputPixels.indices) {
+                                val a = inputPixels[i]
+                                val b = outputPixels[i]
+                                sum += (kotlin.math.abs(Color.red(a) - Color.red(b)) +
+                                    kotlin.math.abs(Color.green(a) - Color.green(b)) +
+                                    kotlin.math.abs(Color.blue(a) - Color.blue(b))) / 3.0
+                            }
+                            android.util.Log.i("DoramaAvatar", "V142 EDTalk mean pixel difference=${sum / inputPixels.size}")
+                        }
                         val mappedFace = unalignEdtalkFace(face, aligned, crop)
                         val composed = compositeMouth(
                             base, mappedFace, crop,
