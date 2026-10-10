@@ -27,6 +27,9 @@ import kotlin.concurrent.thread
 import kotlin.math.*
 
 class MainActivity : AppCompatActivity() {
+    // V143_REPORT: first-frame diagnostics, exported to Downloads.
+    private var v143Report: String = ""
+
     private var imageUri: Uri? = null
     private var audioUri: Uri? = null
     private lateinit var status: TextView
@@ -1215,10 +1218,16 @@ class MainActivity : AppCompatActivity() {
                         check(sourceFrame.size == 80 * 16 && sourceFrame.all { it.isFinite() && it >= -4f && it <= 4f }) {
                             "EDTalk: invalid mel tensor"
                         }
-                        if (f == 0) android.util.Log.i(
-                            "DoramaAvatar",
-                            "V142 EDTalk mel min=${sourceFrame.minOrNull()} max=${sourceFrame.maxOrNull()} mean=${sourceFrame.average()}"
-                        )
+                        if (f == 0) {
+                            val melReport = "EDTalk V1.4.3\n" +
+                                "Mel shape: 1x1x80x16\n" +
+                                "Mel min: ${sourceFrame.minOrNull()}\n" +
+                                "Mel max: ${sourceFrame.maxOrNull()}\n" +
+                                "Mel mean: ${sourceFrame.average()}\n" +
+                                "RGB input: 1x3x256x256, validated 0..1\n"
+                            v143Report = melReport
+                            android.util.Log.i("DoramaAvatar", melReport)
+                        }
 
                         val face = OnnxTensor.createTensor(
                             env,
@@ -1261,7 +1270,12 @@ class MainActivity : AppCompatActivity() {
                                     kotlin.math.abs(Color.green(a) - Color.green(b)) +
                                     kotlin.math.abs(Color.blue(a) - Color.blue(b))) / 3.0
                             }
-                            android.util.Log.i("DoramaAvatar", "V142 EDTalk mean pixel difference=${sum / inputPixels.size}")
+                            val diffReport = "Output/input mean RGB absolute difference: ${sum / inputPixels.size}\n"
+                            v143Report += diffReport
+                            v143Report += "Engine: EDTalk 256\n"
+                            val reportUri = saveDiagnosticText(v143Report)
+                            android.util.Log.i("DoramaAvatar", "V143 report saved: $reportUri")
+                            if (reportUri == null) android.util.Log.e("DoramaAvatar", "V143 report save failed")
                         }
                         val mappedFace = unalignEdtalkFace(face, aligned, crop)
                         val composed = compositeMouth(
@@ -1577,6 +1591,27 @@ class MainActivity : AppCompatActivity() {
             if (y % 2 == 0 && x % 2 == 0) { out[uvi++] = yy[1].toByte(); out[uvi++] = yy[2].toByte() }
         }
         return out
+    }
+
+    private fun saveDiagnosticText(content: String): Uri? {
+        return try {
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, "EDTalk_Diagnostic_${System.currentTimeMillis()}.txt")
+                put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.Downloads.RELATIVE_PATH, "Download/DoramaAvatar")
+                }
+            }
+            val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: return null
+            contentResolver.openOutputStream(uri)?.use {
+                it.write(content.toByteArray(Charsets.UTF_8))
+            } ?: return null
+            uri
+        } catch (e: Exception) {
+            android.util.Log.e("DoramaAvatar", "Diagnostic export failed", e)
+            null
+        }
     }
 
     private fun savePng(bitmap: Bitmap, fileName: String): Uri? {
