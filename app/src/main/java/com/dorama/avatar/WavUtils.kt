@@ -294,6 +294,18 @@ object WavUtils {
         return sb.toString()
     }
 
+    // V145_AUDIO_AB: undo Hann-window sum normalization in experimental mode.
+    fun edtalkFrameExperimental(spec: Array<FloatArray>, frameIndex: Int, fps: Int = 25): FloatArray {
+        val start = floor(frameIndex * 80.0 / fps).toInt()
+        val out = FloatArray(N_MELS * 16)
+        for (m in 0 until N_MELS) for (x in 0 until 16) {
+            val raw = spec[m][(start + x).coerceAtMost(spec[m].lastIndex)]
+            out[m * 16 + x] = (log10(max(1e-5f, raw * 400f).toDouble()) * 1.6 + 3.2)
+                .toFloat().coerceIn(-4f, 4f)
+        }
+        return out
+    }
+
     fun edtalkFrame(spec: Array<FloatArray>, frameIndex: Int, fps: Int = 25): FloatArray {
         val start = floor(frameIndex * 80.0 / fps).toInt()
         val out = FloatArray(N_MELS * 16)

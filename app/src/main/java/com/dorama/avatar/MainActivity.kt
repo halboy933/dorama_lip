@@ -44,6 +44,8 @@ class MainActivity : AppCompatActivity() {
     private var mouthAngleDeg: Int = 3
     private var mouthScalePercent: Int = 89
     private var engineMode: String = "edtalk256"
+    // V145_AUDIO_AB
+    private var experimentalAudio = false
     // Coordinates of manually selected lips, normalized to the full source image.
     private var lipX = 0.50f
     private var lipY = 0.72f
@@ -477,7 +479,21 @@ class MainActivity : AppCompatActivity() {
         }
 
         engineMode = prefs.getString("lip_engine", "edtalk256") ?: "edtalk256"
+        experimentalAudio = prefs.getBoolean("edtalk_experimental_audio", false)
+        val audioToggle = CheckBox(this).apply {
+            text = "EDTalk: экспериментальный звук (×400)"
+            isChecked = experimentalAudio
+            setOnCheckedChangeListener { _, checked ->
+                experimentalAudio = checked
+                prefs.edit().putBoolean("edtalk_experimental_audio", checked).apply()
+            }
+        }
+        // Insert immediately below engine selection; no XML changes required.
         val engineGroup = findViewById<RadioGroup>(R.id.engineGroup)
+        (engineGroup.parent as? ViewGroup)?.let { parent ->
+            val index = parent.indexOfChild(engineGroup)
+            parent.addView(audioToggle, index + 1)
+        }
         findViewById<RadioButton>(
             if (engineMode == "wav2lip96") R.id.engine96 else R.id.engine256
         ).isChecked = true
@@ -1147,6 +1163,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 val started = System.currentTimeMillis()
                 val engineAtStart = engineMode
+                val experimentalAudioAtStart = experimentalAudio
                 val engineLabel = if (engineAtStart == "edtalk256") {
                     "EDTalk 256×256"
                 } else {
@@ -1192,7 +1209,9 @@ class MainActivity : AppCompatActivity() {
                 if (engineAtStart == "edtalk256") {
                     val spec = WavUtils.edtalkSpectrogram(samples)
                     // V144_MEL_DIAGNOSTICS: exported to Downloads without ADB.
-                    v143Report = WavUtils.edtalkMelReport(spec, frames)
+                    v143Report = "V1.4.5 selected mode: " +
+                        (if (experimentalAudioAtStart) "experimental x400" else "original") + "\n" +
+                        WavUtils.edtalkMelReport(spec, frames)
                     val v144ReportUri = saveDiagnosticText(v143Report)
                     android.util.Log.i("DoramaAvatar", "V144 report: $v144ReportUri")
                     val aligned = alignEdtalkFace(base)
@@ -1218,7 +1237,11 @@ class MainActivity : AppCompatActivity() {
                     } ?: names.last()
 
                     for (f in 0 until frames) {
-                        val sourceFrame = WavUtils.edtalkFrame(spec, f)
+                        val sourceFrame = if (experimentalAudioAtStart) {
+                            WavUtils.edtalkFrameExperimental(spec, f)
+                        } else {
+                            WavUtils.edtalkFrame(spec, f)
+                        }
                         check(sourceFrame.size == 80 * 16 && sourceFrame.all { it.isFinite() && it >= -4f && it <= 4f }) {
                             "EDTalk: invalid mel tensor"
                         }
