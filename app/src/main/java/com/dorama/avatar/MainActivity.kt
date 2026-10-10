@@ -1193,6 +1193,7 @@ class MainActivity : AppCompatActivity() {
                     val spec = WavUtils.edtalkSpectrogram(samples)
                     val aligned = alignEdtalkFace(base)
                     savePng(aligned.bitmap, "V139_01_aligned_input.png")
+                    savePng(aligned.bitmap, "V140_01_aligned_input_256.png")
                     val targetInput = imageTensor256(aligned.bitmap)
 
                     val sourceName = names.firstOrNull {
@@ -1252,7 +1253,12 @@ class MainActivity : AppCompatActivity() {
                             val stamp = System.currentTimeMillis()
                             savePng(crop.bitmap, "V132_01_input_crop_${stamp}.png")
                             savePng(face, "V132_02_edtalk256_face_${stamp}.png")
+                            if (savePng(face, "V140_02_raw_model_output_256_${stamp}.png") == null) {
+                                android.util.Log.e("DoramaAvatar", "V140 raw PNG save failed")
+                            }
                             savePng(mappedFace, "V139_02_inverse_mapped_${stamp}.png")
+                            savePng(mappedFace, "V140_03_inverse_mapped_${stamp}.png")
+                            savePng(composed, "V140_04_composite_before_encoder_${stamp}.png")
                             savePng(composed, "V132_03_composite_before_encoder_${stamp}.png")
                         }
 
