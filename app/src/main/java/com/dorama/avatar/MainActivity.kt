@@ -714,8 +714,13 @@ class MainActivity : AppCompatActivity() {
             }
             val rect = face.boundingBox
             canvas.drawRect(rect, paint)
-            savePng(out, "V138_04_landmarks_original.png")
+            val saved = savePng(out, "V138_04_landmarks_original.png")
             out.recycle()
+            if (saved == null) throw IllegalStateException("Не удалось сохранить PNG")
+            val found = points.count { (type, _) -> face.getLandmark(type) != null }
+            runOnUiThread {
+                Toast.makeText(this@MainActivity, "EDTalk: найдено точек $found/5; PNG сохранён", Toast.LENGTH_LONG).show()
+            }
         } finally {
             detector.close()
         }
@@ -1107,8 +1112,15 @@ class MainActivity : AppCompatActivity() {
                 val rect = detectFace(base)
                 val crop = cropInfo(base, rect)
                 if (engineAtStart == "edtalk256") {
+                    // V1381_LANDMARK_RESULT: show diagnostic failure on screen
                     try { saveFaceLandmarkDiagnostic(base) }
-                    catch (e: Exception) { android.util.Log.w("DoramaAvatar", "Landmark diagnostic failed", e) }
+                    catch (e: Exception) {
+                        android.util.Log.e("DoramaAvatar", "Landmark diagnostic failed", e)
+                        val reason = e.message ?: e.javaClass.simpleName
+                        runOnUiThread {
+                            Toast.makeText(this@MainActivity, "EDTalk диагностика: $reason", Toast.LENGTH_LONG).show()
+                        }
+                    }
                 }
 
 
