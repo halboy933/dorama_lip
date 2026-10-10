@@ -268,6 +268,32 @@ object WavUtils {
         return result
     }
 
+    // V144_MEL_DIAGNOSTICS: report-only, no inference changes.
+    fun edtalkMelReport(spec: Array<FloatArray>, totalFrames: Int): String {
+        val picks = listOf(0, totalFrames / 4, totalFrames / 2, 3 * totalFrames / 4, totalFrames - 1)
+            .filter { it >= 0 }.distinct()
+        val gain = WIN * 0.5f // Hann sum = 400 for 800 samples
+        val sb = StringBuilder("EDTalk V1.4.4 mel comparison\n")
+        sb.append("Current: log10(max(raw,1e-5))*1.6+3.2, clamp [-4,4]\n")
+        sb.append("Alternative: multiply raw by 400 before log; diagnostic only\n")
+        for (f in picks) {
+            val current = edtalkFrame(spec, f)
+            val start = floor(f * 80.0 / 25).toInt()
+            val alternative = FloatArray(N_MELS * 16)
+            for (mel in 0 until N_MELS) for (i in 0 until 16) {
+                val raw = spec[mel][(start + i).coerceAtMost(spec[mel].lastIndex)]
+                alternative[mel * 16 + i] =
+                    (log10(max(1e-5f, raw * gain).toDouble()) * 1.6 + 3.2).toFloat().coerceIn(-4f, 4f)
+            }
+            fun stats(label: String, a: FloatArray): String =
+                "$label min=${a.minOrNull()} max=${a.maxOrNull()} mean=${a.average()} floor=${a.count { it <= -3.999f }}/${a.size}\n"
+            sb.append("frame=$f\n")
+            sb.append(stats("current", current))
+            sb.append(stats("windowGain400", alternative))
+        }
+        return sb.toString()
+    }
+
     fun edtalkFrame(spec: Array<FloatArray>, frameIndex: Int, fps: Int = 25): FloatArray {
         val start = floor(frameIndex * 80.0 / fps).toInt()
         val out = FloatArray(N_MELS * 16)

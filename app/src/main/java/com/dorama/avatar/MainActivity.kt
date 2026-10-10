@@ -1191,6 +1191,10 @@ class MainActivity : AppCompatActivity() {
 
                 if (engineAtStart == "edtalk256") {
                     val spec = WavUtils.edtalkSpectrogram(samples)
+                    // V144_MEL_DIAGNOSTICS: exported to Downloads without ADB.
+                    v143Report = WavUtils.edtalkMelReport(spec, frames)
+                    val v144ReportUri = saveDiagnosticText(v143Report)
+                    android.util.Log.i("DoramaAvatar", "V144 report: $v144ReportUri")
                     val aligned = alignEdtalkFace(base)
                     savePng(aligned.bitmap, "V139_01_aligned_input.png")
                     savePng(aligned.bitmap, "V140_01_aligned_input_256.png")
@@ -1225,7 +1229,7 @@ class MainActivity : AppCompatActivity() {
                                 "Mel max: ${sourceFrame.maxOrNull()}\n" +
                                 "Mel mean: ${sourceFrame.average()}\n" +
                                 "RGB input: 1x3x256x256, validated 0..1\n"
-                            v143Report = melReport
+                            v143Report += "\n" + melReport
                             android.util.Log.i("DoramaAvatar", melReport)
                         }
 
