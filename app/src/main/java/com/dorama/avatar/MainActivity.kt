@@ -1000,18 +1000,15 @@ class MainActivity : AppCompatActivity() {
         scalePercent: Int
     ): Bitmap {
         val out = base.copy(Bitmap.Config.ARGB_8888, true)
-        val generatedScaled = Bitmap.createScaledBitmap(generated96, c.width, c.height, true)
-        val generated = if (generated96.width <= 96) {
-            val sharp = sharpenGenerated(generatedScaled)
-            generatedScaled.recycle()
-            sharp
+        // V141_DIRECT_INVERSE_RENDER: EDTalk is already inverse-mapped to crop
+        // coordinates. Do not rescale or sharpen it a second time.
+        val generated = if (generated96.width == c.width && generated96.height == c.height) {
+            generated96.copy(Bitmap.Config.ARGB_8888, false)
         } else {
-            // V1.3.7: localized detail enhancement. The generated face is only
-            // inserted through the lip mask, so original skin stays untouched.
-            // Keep sharpening mild: EDTalk cannot reconstruct missing detail.
-            val enhanced = sharpenGenerated(generatedScaled, 0.24f)
-            generatedScaled.recycle()
-            enhanced
+            val scaled = Bitmap.createScaledBitmap(generated96, c.width, c.height, true)
+            val sharp = sharpenGenerated(scaled, if (generated96.width <= 96) 0.48f else 0.24f)
+            scaled.recycle()
+            sharp
         }
 
         // Manual ellipse center mapped from the full image into the face crop.
@@ -1258,7 +1255,9 @@ class MainActivity : AppCompatActivity() {
                             }
                             savePng(mappedFace, "V139_02_inverse_mapped_${stamp}.png")
                             savePng(mappedFace, "V140_03_inverse_mapped_${stamp}.png")
+                            savePng(mappedFace, "V141_01_direct_inverse_no_rescale_${stamp}.png")
                             savePng(composed, "V140_04_composite_before_encoder_${stamp}.png")
+                            savePng(composed, "V141_02_composite_no_double_scale_${stamp}.png")
                             savePng(composed, "V132_03_composite_before_encoder_${stamp}.png")
                         }
 
